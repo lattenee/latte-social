@@ -1,0 +1,72 @@
+# latte-social overrides: env + resource caps so we never starve hgsg production
+services:
+  postiz:
+    environment:
+      MAIN_URL: "https://social.lattee.me"
+      FRONTEND_URL: "https://social.lattee.me"
+      NEXT_PUBLIC_BACKEND_URL: "https://social.lattee.me/api"
+      JWT_SECRET: "CHANGE_ME_GENERATE_48_CHARS"
+      DATABASE_URL: "postgresql://postiz-user:CHANGE_ME@postiz-postgres:5432/postiz-db-local"
+      REDIS_URL: "redis://postiz-redis:6379"
+      IS_GENERAL: "true"
+      DISABLE_REGISTRATION: "false"
+      RUN_CRON: "true"
+      STORAGE_PROVIDER: "local"
+      UPLOAD_DIRECTORY: "/uploads"
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: "/uploads"
+      TEMPORAL_ADDRESS: "temporal:7233"
+      BACKEND_INTERNAL_URL: "http://localhost:3000"
+      NX_ADD_PLUGINS: "false"
+      FEE_AMOUNT: "0"
+      API_LIMIT: "30"
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: "2.0"
+
+  postiz-postgres:
+    environment:
+      POSTGRES_USER: postiz-user
+      POSTGRES_PASSWORD: CHANGE_ME
+      POSTGRES_DB: postiz-db-local
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  postiz-redis:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  temporal:
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  temporal-elasticsearch:
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+          cpus: "0.5"
+
+  temporal-postgresql:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  temporal-ui:
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
