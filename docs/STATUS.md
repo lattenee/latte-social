@@ -17,7 +17,8 @@ Tracked as GitHub issues on `lattenee/latte-social` (use `-R lattenee/latte-soci
 - [x] #4 Rebrand → "Latte" (cc95a8d9) + vi locale verified (100% coverage, shipped upstream). Gap: non-en locales still show "Postiz".
 - [x] #5 Zalo OA provider stub (c698233b): OAuth v4+PKCE, 25h-token refreshCron, article create/verify. Real-keys verification gated on #3.
 - [x] #6 `latte-engine` scaffolded — https://github.com/lattenee/latte-engine (private). Postiz+MPT+Gemini clients, vn-cafe-promo niche, 9 tests green.
-- [ ] Fill real Postiz integration IDs into `niches/vn-cafe-promo.yaml` channel_map, then dogfood 1 VN channel (Phase 1 exit).
+- [x] Dogfood Phase 1 end-to-end: FB Page "Tiệm Hoa Thanh Hương" (`cmv68t6m70001lo7wnv6bzy7l`) + IG "Nguyễn Hoàng Tuấn Anh" (`cmv68u9x90003lo7wkdh1f92p`) connected via dev-mode Meta app 810699631212046; Google OAuth client for `/integrations/social/youtube`; first engine job scheduled both channels (+12h review buffer). Engine runs locally via SSH tunnel; MPT container `mpt` on hgsg (127.0.0.1:18080, video_source=local, 4g/2cpu cap).
+  Gotchas found: Postiz public API mounts under `/api` (`POSTIZ_API_URL` must be `https://social.lattee.me/api`); MPT `video_script` is a string and `videos` entries are strings; empty `video_terms` triggers MPT's internal LLM (needs llm_provider configured — set to gemini); `vi-VN-*` voices route to broken azure_tts_v1 — use `gemini:` voices; IG settings require `post_type`.
 - [ ] #7 Phase 2 engine modules (trends/analytics/loop), #8 Phase 3 SaaS readiness — needs-triage
 - [ ] Decide billing/payment later (deferred by design).
 
