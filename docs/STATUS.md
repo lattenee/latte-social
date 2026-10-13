@@ -10,14 +10,16 @@
 
 ## Pending (next actions)
 
-- [ ] **Platform developer apps** (human, weeks of lead time — start now):
-  - Meta app + **Business Verification** (covers FB Page, IG, Threads)
-  - TikTok developer app → enable Content Posting API (draft mode works pre-audit; Direct Post needs audit)
-  - Zalo developer app + Zalo OA (article API, OAuth v4+PKCE, 25h tokens)
-  - Put the returned keys into `latte.override.yaml` on the VPS (`FACEBOOK_APP_ID`, `TIKTOK_CLIENT_ID`, ...) and restart postiz.
-- [ ] Fork `gitroomhq/postiz-app` source into this repo (currently runs the published image; source needed for Zalo provider, vi locale, rebrand).
-- [ ] Scaffold `latte-engine` (private repo, Python/FastAPI) per `docs/design/architecture.md`.
+Tracked as GitHub issues on `lattenee/latte-social` (use `-R lattenee/latte-social` — gh resolves to `upstream` otherwise).
+
+- [ ] **Platform developer apps** (human, weeks of lead time — start now): #1 Meta + Business Verification, #2 TikTok Content Posting API, #3 Zalo app + OA. Put returned keys into `latte.override.yaml` on the VPS and restart postiz.
+- [x] Fork `gitroomhq/postiz-app` source into this repo — upstream merged into `master` (`git remote upstream`; rebase custom commits on `upstream/main` to update). vi locale ships upstream already.
+- [ ] #4 Rebrand → "Latte" + vi locale wiring in fork
+- [ ] #5 Zalo OA provider stub in fork (OAuth v4+PKCE, 25h-token refresh, OA article API)
+- [ ] #6 Scaffold `latte-engine` (private repo, Python/FastAPI) per `docs/design/architecture.md` — lives at `D:\Project\latte-engine`
+- [ ] #7 Phase 2 engine modules (trends/analytics/loop), #8 Phase 3 SaaS readiness — needs-triage
 - [ ] Decide billing/payment later (deferred by design).
+- [ ] **Repo visibility**: repo is currently PRIVATE; architecture/ADR-0001 call for public (AGPL network-use means users of social.lattee.me must be able to get the fork's source). Flip to public once comfortable, or document an alternative source-offer mechanism.
 
 ## Access cheat-sheet
 

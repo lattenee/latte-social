@@ -14,6 +14,8 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+> **Gotcha**: this repo has a git remote named `upstream` (postiz-app). `gh` prefers `upstream` over `origin` when resolving the base repo, so commands without `-R` will hit `gitroomhq/postiz-app`. Always pass `-R lattenee/latte-social`.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
