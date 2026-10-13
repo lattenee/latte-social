@@ -348,7 +348,7 @@ const ChromeExtensionWarning: FC<{
           We will store your cookies securely to facilitate the connection.
         </li>
         <li>
-          Postiz does not take responsibility for any issues arising or account
+          Latte does not take responsibility for any issues arising or account
           termination due to the use of this method.
         </li>
       </ul>

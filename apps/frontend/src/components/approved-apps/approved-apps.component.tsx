@@ -63,7 +63,7 @@ export const ApprovedAppsComponent: FC = () => {
       <div className="text-customColor18">
         {t(
           'apps_you_have_authorized',
-          'Applications you have authorized to access your Postiz account.'
+          'Applications you have authorized to access your Latte account.'
         )}
       </div>
 

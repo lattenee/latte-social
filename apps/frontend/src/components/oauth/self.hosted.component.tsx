@@ -79,7 +79,7 @@ export const OAuthSelfHosted: FC<{
       <div className="flex flex-col gap-[4px]">
         <div className="text-[16px] font-semibold">Use self-hosted</div>
         <div className="text-[14px] text-gray-400">
-          {appName} will work with your own Postiz instance. Postiz Cloud
+          {appName} will work with your own Latte instance. Latte Cloud
           relays its requests, and your API key is stored encrypted.
         </div>
       </div>
@@ -93,7 +93,7 @@ export const OAuthSelfHosted: FC<{
         removeError={true}
         value={instanceUrl}
         onChange={(e) => setInstanceUrl(e.target.value)}
-        placeholder="https://postiz.example.com"
+        placeholder="https://latte.example.com"
         inputMode="url"
         autoComplete="off"
         spellCheck={false}
