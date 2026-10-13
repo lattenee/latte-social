@@ -71,6 +71,8 @@ services:
       MASTODON_URL: 'https://mastodon.social'
       MASTODON_CLIENT_ID: ''
       MASTODON_CLIENT_SECRET: ''
+      ZALO_APP_ID: ''
+      ZALO_APP_SECRET: ''
 
       # === OAuth & Authentik Settings
       # NEXT_PUBLIC_POSTIZ_OAUTH_DISPLAY_NAME: 'Authentik'
