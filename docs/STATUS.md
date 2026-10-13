@@ -13,13 +13,13 @@
 Tracked as GitHub issues on `lattenee/latte-social` (use `-R lattenee/latte-social` — gh resolves to `upstream` otherwise).
 
 - [ ] **Platform developer apps** (human, weeks of lead time — start now): #1 Meta + Business Verification, #2 TikTok Content Posting API, #3 Zalo app + OA. Put returned keys into `latte.override.yaml` on the VPS and restart postiz.
-- [x] Fork `gitroomhq/postiz-app` source into this repo — upstream merged into `master` (`git remote upstream`; rebase custom commits on `upstream/main` to update). vi locale ships upstream already.
-- [ ] #4 Rebrand → "Latte" + vi locale wiring in fork
-- [ ] #5 Zalo OA provider stub in fork (OAuth v4+PKCE, 25h-token refresh, OA article API)
-- [ ] #6 Scaffold `latte-engine` (private repo, Python/FastAPI) per `docs/design/architecture.md` — lives at `D:\Project\latte-engine`
+- [x] Fork `gitroomhq/postiz-app` source — upstream merged into `master` and pushed (`git remote upstream`; rebase custom commits on `upstream/main` to update). Repo now **public** (AGPL compliance per ADR-0001).
+- [x] #4 Rebrand → "Latte" (cc95a8d9) + vi locale verified (100% coverage, shipped upstream). Gap: non-en locales still show "Postiz".
+- [x] #5 Zalo OA provider stub (c698233b): OAuth v4+PKCE, 25h-token refreshCron, article create/verify. Real-keys verification gated on #3.
+- [x] #6 `latte-engine` scaffolded — https://github.com/lattenee/latte-engine (private). Postiz+MPT+Gemini clients, vn-cafe-promo niche, 9 tests green.
+- [ ] Fill real Postiz integration IDs into `niches/vn-cafe-promo.yaml` channel_map, then dogfood 1 VN channel (Phase 1 exit).
 - [ ] #7 Phase 2 engine modules (trends/analytics/loop), #8 Phase 3 SaaS readiness — needs-triage
 - [ ] Decide billing/payment later (deferred by design).
-- [ ] **Repo visibility**: repo is currently PRIVATE; architecture/ADR-0001 call for public (AGPL network-use means users of social.lattee.me must be able to get the fork's source). Flip to public once comfortable, or document an alternative source-offer mechanism.
 
 ## Access cheat-sheet
 
