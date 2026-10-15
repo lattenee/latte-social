@@ -10,9 +10,10 @@ name: Resolve staging conflicts
 #   STAGING_MERGE_KEY         private half of a write-enabled deploy key
 #   CLAUDE_CODE_OAUTH_TOKEN   Claude API key, despite the secret name
 
+# NOTE: schedule disabled — the 'staging' branch does not exist, so this
+# workflow was failing every 10 minutes at checkout. Re-enable the cron
+# trigger if a staging branch is created again.
 on:
-  schedule:
-    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 concurrency:
