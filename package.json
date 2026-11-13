@@ -37,7 +37,7 @@
     "docker-build": "./var/docker/docker-build.sh",
     "docker-create": "./var/docker/docker-create.sh",
     "postinstall": "pnpm run prisma-generate",
-    "test": "jest --coverage --detectOpenHandles --reporters=default --reporters=jest-junit"
+    "test": "jest --config jest.unit.config.js --coverage --detectOpenHandles"
   },
   "dependencies": {
     "@ag-ui/mastra": "^1.1.4",
@@ -272,7 +272,7 @@
     "@types/compression": "^1.8.1",
     "@types/cookie-parser": "^1.4.6",
     "@types/express": "^5.0.6",
-    "@types/jest": "29.5.12",
+    "@types/jest": "29.5.14",
     "@types/node": "18.16.9",
     "@types/node-telegram-bot-api": "^0.64.7",
     "@types/qrcode": "^1.5.5",
