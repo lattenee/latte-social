@@ -22,7 +22,7 @@ export class LegalController {
   async createDataDeletionRequest(
     @Body() body: { email?: string; note?: string }
   ) {
-    const email = (body?.email || '').trim();
+    const email = typeof body?.email === 'string' ? body.email.trim() : '';
     if (
       !email ||
       email.length > 254 ||

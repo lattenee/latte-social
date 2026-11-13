@@ -44,6 +44,8 @@ export async function proxy(request: NextRequest) {
   }
 
   if (
+    nextUrl.pathname === '/legal' ||
+    nextUrl.pathname.startsWith('/legal/') ||
     nextUrl.pathname.startsWith('/uploads/') ||
     nextUrl.pathname.startsWith('/p/') ||
     nextUrl.pathname.startsWith('/provider/') ||

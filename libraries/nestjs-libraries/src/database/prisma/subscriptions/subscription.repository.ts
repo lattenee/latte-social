@@ -176,7 +176,7 @@ export class SubscriptionRepository {
       return;
     }
 
-    await this._subscription.model.subscription.upsert({
+    const subscription = await this._subscription.model.subscription.upsert({
       where: {
         organizationId: findOrg.id,
         ...(!code && customerId
@@ -228,6 +228,7 @@ export class SubscriptionRepository {
         },
       });
     }
+    return subscription;
   }
 
   getSubscriptionByIdentifier(identifier: string) {
