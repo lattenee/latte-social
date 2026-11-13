@@ -37,6 +37,14 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
   const [step, setStep] = useState(1);
   const modals = useModals();
   const t = useT();
+  const fetch = useFetch();
+
+  const handleFinish = useCallback(() => {
+    // Best-effort marker that first-run onboarding finished; gating on it is
+    // a product decision for later, so a failed call must not block closing.
+    fetch('/user/onboarding/complete', { method: 'POST' }).catch(() => {});
+    onClose();
+  }, [fetch, onClose]);
 
   const steps = useMemo(
     () => [
@@ -118,7 +126,10 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
               />
             )}
             {step === 3 && (
-              <OnboardingStep3 onBack={() => setStep(2)} onFinish={onClose} />
+              <OnboardingStep3
+                onBack={() => setStep(2)}
+                onFinish={handleFinish}
+              />
             )}
           </div>
         </div>

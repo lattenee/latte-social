@@ -130,6 +130,15 @@ export class IntegrationsController {
             identifier: p.providerIdentifier,
             inBetweenSteps: p.inBetweenSteps,
             refreshNeeded: p.refreshNeeded,
+            // Meaningful connection state, derived (never persisted) so the
+            // UI can show one honest status instead of combining flags.
+            connectionState: p.disabled
+              ? 'disabled'
+              : p.refreshNeeded
+              ? 'needs_reconnect'
+              : p.inBetweenSteps
+              ? 'incomplete'
+              : 'connected',
             isCustomFields: !!findIntegration.customFields,
             isChromeExtension: !!findIntegration.isChromeExtension,
             ...(findIntegration.customFields

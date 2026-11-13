@@ -113,6 +113,7 @@ export class UsersController {
         ? false
         : organization?.isTrailing,
       allowTrial: organization?.allowTrial,
+      onboardedAt: organization?.onboardedAt || null,
       streakSince: organization?.streakSince || null,
       publicApi:
         // @ts-ignore
@@ -127,6 +128,17 @@ export class UsersController {
   @Get('/personal')
   async getPersonalInformation(@GetUserFromRequest() user: User) {
     return this._userService.getPersonal(user.id);
+  }
+
+  // Called when the workspace finishes the first-run onboarding flow. The
+  // timestamp is informational for now - gating features on it is a Phase 3
+  // product decision, this only records that onboarding happened.
+  @Post('/onboarding/complete')
+  completeOnboarding(@GetOrgFromRequest() organization: Organization) {
+    if (!organization) {
+      throw new HttpForbiddenException();
+    }
+    return this._orgService.markOnboarded(organization.id);
   }
 
   @Get('/impersonate')

@@ -710,4 +710,16 @@ export class OrganizationRepository {
       },
     });
   }
+
+  markOnboarded(orgId: string) {
+    return this._organization.model.organization.update({
+      where: {
+        id: orgId,
+      },
+      data: {
+        onboardedAt: new Date(),
+      },
+      select: { id: true, onboardedAt: true },
+    });
+  }
 }
