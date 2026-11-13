@@ -63,6 +63,18 @@ export class PostsRepository {
     });
   }
 
+  getPostState(id: string) {
+    return this._post.model.post.findUnique({
+      where: {
+        id,
+        deletedAt: null,
+      },
+      select: {
+        state: true,
+      },
+    });
+  }
+
   getOldPosts(orgId: string, date: string) {
     return this._post.model.post.findMany({
       where: {
@@ -224,29 +236,41 @@ export class PostsRepository {
       },
     });
 
-    return list
-      .map((post) => ({ ...post, error: this.curatedError(post.error) }))
-      .reduce((all, post) => {
-      if (!post.intervalInDays) {
-        return [...all, post];
+    // This runs on the request thread, so keep it linear: push into one array
+    // (spreading the accumulator on every post was quadratic and blocked the
+    // event loop for seconds on large orgs), and expand repeating posts only
+    // inside [startDate, endDate] instead of from their first publish date.
+    const rangeStart = dayjs.utc(startDate);
+    const rangeEnd = dayjs.utc(endDate);
+    const result: any[] = [];
+
+    for (const row of list) {
+      const post = { ...row, error: this.curatedError(row.error) };
+      if (!post.intervalInDays || post.intervalInDays < 1) {
+        result.push(post);
+        continue;
       }
 
-      const addMorePosts = [];
-      let startingDate = dayjs.utc(post.publishDate);
-      while (dayjs.utc(endDate).isSameOrAfter(startingDate)) {
-        if (dayjs(startingDate).isSameOrAfter(dayjs.utc(post.publishDate))) {
-          addMorePosts.push({
-            ...post,
-            publishDate: startingDate.toDate(),
-            actualDate: post.publishDate,
-          });
-        }
-
-        startingDate = startingDate.add(post.intervalInDays, 'days');
+      const firstDate = dayjs.utc(post.publishDate);
+      let occurrence = firstDate;
+      if (rangeStart.isAfter(firstDate)) {
+        const skip = Math.ceil(
+          rangeStart.diff(firstDate, 'day', true) / post.intervalInDays
+        );
+        occurrence = firstDate.add(skip * post.intervalInDays, 'day');
       }
 
-      return [...all, ...addMorePosts];
-    }, [] as any[]);
+      while (!occurrence.isAfter(rangeEnd)) {
+        result.push({
+          ...post,
+          publishDate: occurrence.toDate(),
+          actualDate: post.publishDate,
+        });
+        occurrence = occurrence.add(post.intervalInDays, 'day');
+      }
+    }
+
+    return result;
   }
 
   async getPostsList(orgId: string, query: GetPostsListDto) {
@@ -603,6 +627,19 @@ export class PostsRepository {
     });
   }
 
+  countPostsOfOtherOrganizations(orgId: string, ids: string[]) {
+    return this._post.model.post.count({
+      where: {
+        organizationId: {
+          not: orgId,
+        },
+        id: {
+          in: ids,
+        },
+      },
+    });
+  }
+
   async createOrUpdatePost(
     state: 'draft' | 'schedule' | 'now' | 'update',
     orgId: string,
@@ -756,6 +793,7 @@ export class PostsRepository {
       ? (
           await this._post.model.post.findFirst({
             where: {
+              organizationId: orgId,
               group: body.group,
               deletedAt: null,
               parentPostId: null,
@@ -770,6 +808,7 @@ export class PostsRepository {
     if (body.group && !keepGroup) {
       await this._post.model.post.updateMany({
         where: {
+          organizationId: orgId,
           group: body.group,
           deletedAt: null,
         },
@@ -785,6 +824,7 @@ export class PostsRepository {
     if (body.group && keepGroup) {
       await this._post.model.post.updateMany({
         where: {
+          organizationId: orgId,
           group: body.group,
           deletedAt: null,
           id: {

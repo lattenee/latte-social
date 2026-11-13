@@ -16,6 +16,7 @@ import {
 import * as process from 'node:process';
 import dayjs from 'dayjs';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 import { GmbSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/gmb.settings.dto';
 
 const clientAndGmb = () => {
@@ -202,6 +203,7 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  @DashboardFunction()
   async pages(accessToken: string) {
     // Get all accounts with pagination
     const allAccounts: any[] = [];
@@ -235,6 +237,7 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
     const allLocations: Array<{
       id: string;
       name: string;
+      address: string;
       picture: { data: { url: string } };
       accountName: string;
       locationName: string;
@@ -304,6 +307,14 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
                 // id is the full resource path for the v4 API: accounts/{accountId}/locations/{locationId}
                 id: fullResourceName,
                 name: location.title || 'Unnamed Location',
+                address: [
+                  ...(location.storefrontAddress?.addressLines || []),
+                  location.storefrontAddress?.locality,
+                  location.storefrontAddress?.administrativeArea,
+                  location.storefrontAddress?.postalCode,
+                ]
+                  .filter((f) => f)
+                  .join(', '),
                 picture: { data: { url: photoUrl } },
                 accountName: accountName,
                 locationName: location.name,

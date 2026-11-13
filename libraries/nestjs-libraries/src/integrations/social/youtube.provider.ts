@@ -13,9 +13,11 @@ import { OAuth2Client } from 'google-auth-library/build/src/auth/oauth2client';
 import { YoutubeSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/youtube.settings.dto';
 import {
   BadBody,
+  PublishedWithError,
   RefreshToken,
   SocialAbstract,
   ValidityMedia,
+  rangeReadFailure,
   stripQuery,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import * as process from 'node:process';
@@ -24,6 +26,7 @@ import { createReadStream, statSync } from 'fs';
 import { getSsrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { setHeartbeatDetails } from '@gitroom/nestjs-libraries/temporal/temporal.heartbeat';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 
 const clientAndYoutube = () => {
   const client = new google.auth.OAuth2({
@@ -201,6 +204,14 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
+    if (body.includes('defaultVideoInsertPerDayPerProject')) {
+      return {
+        type: 'bad-body',
+        value:
+          "YouTube's daily upload quota is exhausted for today, please reschedule this post for a later time.",
+      };
+    }
+
     if (body.includes('rateLimitExceeded')) {
       return {
         type: 'bad-body',
@@ -237,7 +248,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       return {
         type: 'bad-body',
         value:
-          'Your account is not verified, we have uploaded your video but we could not set the thumbnail. Please verify your account and try again.',
+          'Your video was uploaded to YouTube successfully, but we could not set the thumbnail: custom thumbnails require a phone-verified YouTube channel. Verify your channel at youtube.com/verify, and set this video\'s thumbnail manually in YouTube Studio.',
       };
     }
 
@@ -341,6 +352,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  @DashboardFunction()
   async pages(accessToken: string) {
     const { client, youtube } = clientAndYoutube();
     client.setCredentials({ access_token: accessToken });
@@ -472,7 +484,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       return Number(length);
     }
 
-    return statSync(path).size;
+    return statSync(this.localMediaPath(path, this.identifier)).size;
   }
 
   // Returns a streaming body for the [start, end] byte range of the media so we
@@ -497,9 +509,10 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       // A store that ignores Range (200 with the full file) or answers with an
       // error page would corrupt the upload at this offset.
       if (response.status !== 206) {
+        await response.body?.cancel().catch(() => {});
         throw new BadBody(
           this.identifier,
-          '{}',
+          rangeReadFailure(response),
           '{}',
           'The media storage did not return the requested byte range, please try again'
         );
@@ -508,7 +521,10 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       return response.body;
     }
 
-    return createReadStream(path, { start, end });
+    return createReadStream(this.localMediaPath(path, this.identifier), {
+      start,
+      end,
+    });
   }
 
   // Asks the upload session for the truth: the created video when the upload
@@ -632,7 +648,11 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
           videoSize,
           path,
           uploadedBytes: 0,
-          thumbnail: settings?.thumbnail?.path || '',
+          // the YouTube setting wins, so posts that set both keep publishing
+          // with the one they always had
+          thumbnail:
+            settings?.thumbnail?.path || firstPost?.media?.[0]?.thumbnail || '',
+          postDbId: firstPost.id,
         },
       },
     ];
@@ -647,6 +667,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       uploadedBytes: number;
       thumbnail: string;
       videoId?: string;
+      postDbId?: string;
     },
     integration: Integration
   ): Promise<PendingCheckResponse> {
@@ -698,6 +719,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       uploadedBytes: number;
       thumbnail: string;
       videoId?: string;
+      postDbId?: string;
     },
     integration: Integration
   ): Promise<PendingCheckResponse> {
@@ -810,31 +832,49 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       }
     }
 
+    const releaseURL = `https://www.youtube.com/watch?v=${videoId}`;
+
     if (pendingData.thumbnail) {
       const { client, youtube } = clientAndYoutube();
       client.setCredentials({ access_token: accessToken });
       const youtubeClient = youtube(client);
 
-      await this.runInConcurrent(async () =>
-        youtubeClient.thumbnails.set({
-          videoId,
-          media: {
-            body: (
-              await this.getSsrfSafeAxios()({
-                url: pendingData.thumbnail,
-                method: 'GET',
-                responseType: 'stream',
-              })
-            ).data,
-          },
-        })
-      );
+      try {
+        await this.runInConcurrent(async () =>
+          youtubeClient.thumbnails.set({
+            videoId,
+            media: {
+              body: (
+                await this.getSsrfSafeAxios()({
+                  url: pendingData.thumbnail,
+                  method: 'GET',
+                  responseType: 'stream',
+                })
+              ).data,
+            },
+          })
+        );
+      } catch (err) {
+        // the video is already live: a rejected thumbnail must not lose its id
+        // and URL (a token problem is left to the refresh + retry path, the
+        // thumbnail call is idempotent)
+        if (err instanceof BadBody && pendingData.postDbId) {
+          throw new PublishedWithError(
+            this.identifier,
+            pendingData.postDbId,
+            videoId,
+            releaseURL,
+            err.message
+          );
+        }
+        throw err;
+      }
     }
 
     return {
       status: 'completed',
       postId: videoId,
-      releaseURL: `https://www.youtube.com/watch?v=${videoId}`,
+      releaseURL,
     };
   }
 

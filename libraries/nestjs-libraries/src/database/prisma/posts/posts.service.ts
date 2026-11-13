@@ -31,10 +31,11 @@ import {
   minifyPostsList,
   minifyPosts,
 } from '@gitroom/helpers/utils/posts.list.minify';
-import axios from 'axios';
+import { getSsrfSafeAxios } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import sharp from 'sharp';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { Readable } from 'stream';
+import { resolve, sep } from 'path';
 import { OpenaiService } from '@gitroom/nestjs-libraries/openai/openai.service';
 dayjs.extend(utc);
 import * as Sentry from '@sentry/nestjs';
@@ -81,8 +82,26 @@ export class PostsService {
     return this._postRepository.searchForMissingThreeHoursPosts();
   }
 
+  getPostState(id: string) {
+    return this._postRepository.getPostState(id);
+  }
+
   updatePost(id: string, postId: string, releaseURL: string) {
     return this._postRepository.updatePost(id, postId, releaseURL);
+  }
+
+  updateResolvedRelease(
+    id: string,
+    orgId: string,
+    releaseId: string,
+    releaseURL: string
+  ) {
+    return this._postRepository.updateResolvedRelease(
+      id,
+      orgId,
+      releaseId,
+      releaseURL
+    );
   }
 
   async getMissingContent(
@@ -516,6 +535,7 @@ export class PostsService {
             })
           )
         )
+          .filter((m) => this.isAllowedMediaPath(m?.path))
           .map((m) => {
             return {
               ...m,
@@ -540,7 +560,9 @@ export class PostsService {
 
             if (hasExtension(m.path, 'png')) {
               imageUpdateNeeded = true;
-              const response = await axios.get(m.url, {
+              // the media url is user-influenced, so it goes through the same
+              // SSRF-safe client as the providers' media reads
+              const response = await getSsrfSafeAxios().get(m.url, {
                 responseType: 'arraybuffer',
               });
 
@@ -595,8 +617,28 @@ export class PostsService {
 
       return getImageList;
     } catch (err: any) {
-      return imagesList;
+      return (imagesList || []).filter((m) =>
+        this.isAllowedMediaPath(m?.path)
+      );
     }
+  }
+
+  // a media path that isn't a remote url is read straight from the worker's
+  // disk, so it has to resolve inside UPLOAD_DIRECTORY
+  private isAllowedMediaPath(path: unknown) {
+    if (typeof path !== 'string' || /^https?:\/\//.test(path)) {
+      return true;
+    }
+
+    // containing "http" anywhere skips the UPLOAD_DIRECTORY prefix, and the
+    // providers would then read it relative to the working directory
+    if (path.indexOf('http') > -1) {
+      return false;
+    }
+
+    const base = resolve(String(process.env.UPLOAD_DIRECTORY));
+    const filePath = resolve(process.env.UPLOAD_DIRECTORY + path);
+    return filePath.startsWith(base + sep);
   }
 
   async getPostGroupDebugExport(orgId: string, group: string) {
@@ -761,15 +803,24 @@ export class PostsService {
       e.replace('(post:', '').replace(')', '')
     );
     const urls = await this._postRepository.getPostUrls(orgId, ids);
-    const newPlainText = ids.reduce((acc, value) => {
-      const findUrl = urls?.find?.((u) => u.id === value)?.releaseURL || '';
-      return acc.replace(
-        new RegExp(`\\(post:${value}\\)`, 'g'),
-        findUrl.split(',')[0]
-      );
-    }, plainText);
+    const replaceTags = (text: string, escape = (url: string) => url) =>
+      ids.reduce((acc, value) => {
+        const findUrl = urls?.find?.((u) => u.id === value)?.releaseURL || '';
+        return acc.replace(new RegExp(`\\(post:${value}\\)`, 'g'), () =>
+          escape(findUrl.split(',')[0])
+        );
+      }, text);
 
-    return this.updateTags(orgId, JSON.parse(newPlainText) as Post[]);
+    // the release url is whatever the platform answered, so it only goes where
+    // a tag is written, the content and the settings (escaped for their json),
+    // and never into the media list, which was validated before this runs
+    return post.map((p) => ({
+      ...p,
+      content: p.content && replaceTags(p.content),
+      settings:
+        p.settings &&
+        replaceTags(p.settings, (url) => JSON.stringify(url).slice(1, -1)),
+    }));
   }
 
   public async checkInternalPlug(
@@ -872,6 +923,8 @@ export class PostsService {
           } catch (err) {}
         }
       } catch (err) {}
+
+      return { id: post.id };
     }
 
     return { error: true };
@@ -1105,6 +1158,20 @@ export class PostsService {
     const postList = [];
     const batchId = uuidv4();
     for (const post of body.posts) {
+      // the posts to update can't belong to another organization, an id that
+      // doesn't exist yet is a new post (the editor makes one for every post)
+      const postIds = [
+        ...new Set((post.value || []).map((p) => p.id).filter(Boolean)),
+      ];
+      if (
+        postIds.length &&
+        (await this._postRepository.countPostsOfOtherOrganizations(
+          orgId,
+          postIds
+        ))
+      ) {
+        throw new NotFoundException('Post not found');
+      }
       if (
         (body.type === 'schedule' || body.type === 'now') &&
         !body.republish &&

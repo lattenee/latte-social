@@ -92,6 +92,7 @@ model User {
   pictureId             String?
   providerId            String?
   timezone              Int
+  timezoneName          String?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   lastReadNotifications DateTime             @default(now())
@@ -119,6 +120,7 @@ model User {
   oauthAuthorizations   OAuthAuthorization[]
 
   @@unique([email, providerName])
+  @@index([providerId, providerName])
   @@index([lastReadNotifications])
   @@index([inviteId])
   @@index([account])
@@ -497,8 +499,10 @@ model Post {
   @@index([batchId])
   @@index([deletedAt])
   @@index([publishDate])
+  @@index([publishDate, state, deletedAt, parentPostId, integrationId, organizationId, creationMethod])
   @@index([state])
   @@index([organizationId])
+  @@index([organizationId, publishDate])
   @@index([parentPostId])
   @@index([submittedForOrderId])
   @@index([intervalInDays])
@@ -523,6 +527,7 @@ model Notifications {
 
   @@index([createdAt])
   @@index([organizationId])
+  @@index([organizationId, createdAt, deletedAt])
   @@index([deletedAt])
 }
 
@@ -737,6 +742,7 @@ model Errors {
 
   @@index([organizationId])
   @@index([createdAt])
+  @@index([createdAt, platform])
 }
 
 model Mentions {

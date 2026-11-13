@@ -168,6 +168,28 @@ export class IntegrationManager {
     );
   }
 
+  // POST /integrations/function runs a provider method by name with the
+  // channel's token as its first argument, so only @Tool methods and the ones
+  // marked @DashboardFunction may be run that way.
+  isDashboardCallable(provider: SocialProvider, methodName: string) {
+    if (typeof (provider as any)[methodName] !== 'function') {
+      return false;
+    }
+
+    const isTool = this.getAllTools()[provider.identifier]?.some(
+      (p) => p.methodName === methodName
+    );
+
+    return (
+      isTool ||
+      !!Reflect.getMetadata(
+        'custom:dashboard_function',
+        provider.constructor.prototype,
+        methodName
+      )
+    );
+  }
+
   getAllRulesDescription(): {
     [key: string]: string;
   } {
@@ -221,6 +243,22 @@ export class IntegrationManager {
 
   getAllowedSocialsIntegrations() {
     return socialIntegrationList.map((p) => p.identifier);
+  }
+
+  // Providers that connect with a plain redirect to the platform - nothing to
+  // type or install first - so following a link is enough (the same ones the
+  // invite links of the add-channel screen offer)
+  getLinkableSocialsIntegrations() {
+    return socialIntegrationList
+      .filter(
+        (p) =>
+          !this.isHiddenProvider(p.identifier) &&
+          !p.externalUrl &&
+          !p.customFields &&
+          !p.isWeb3 &&
+          !p.isChromeExtension
+      )
+      .map((p) => p.identifier);
   }
   getSocialIntegration(integration: string): SocialProvider {
     return socialIntegrationList.find((i) => i.identifier === integration)!;

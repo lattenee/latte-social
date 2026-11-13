@@ -23,6 +23,8 @@ import { LinkedinDto } from '@gitroom/nestjs-libraries/dtos/posts/providers-sett
 import imageToPDF from 'image-to-pdf';
 import { Readable } from 'stream';
 import { Rules } from '@gitroom/nestjs-libraries/chat/rules.description.decorator';
+import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 
 // Travels through the workflow history between postPending, checkPostStatus
 // and finalizePost - keep it small JSON (media urns and the post content, never
@@ -257,6 +259,7 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  @DashboardFunction()
   async company(token: string, data: { url: string }) {
     const { url } = data;
     const getCompanyVanity = url.match(
@@ -1204,9 +1207,16 @@ export class LinkedinProvider extends SocialAbstract implements SocialProvider {
     });
   }
 
+  @Tool({
+    description:
+      'Find a company page to tag by its exact vanity name (the part after linkedin.com/company/). Tag it in the post content with <span data-mention-id="{id}" data-mention-label="{label}">@{label}</span>',
+    dataSchema: [
+      { key: 'query', type: 'string', description: 'Company page vanity name' },
+    ],
+  })
   override async mention(token: string, data: { query: string }) {
     const { elements } = await (
-      await fetch(
+      await this.fetch(
         `https://api.linkedin.com/v2/organizations?q=vanityName&vanityName=${encodeURIComponent(
           data.query
         )}&projection=(elements*(id,localizedName,logoV2(original~:playableStreams)))`,

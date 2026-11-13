@@ -8,28 +8,29 @@ import { useDebouncedCallback } from 'use-debounce';
 import ReactLoading from '@gitroom/frontend/components/layout/loading';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useToaster } from '@gitroom/react/toaster/toaster';
-import dayjs from 'dayjs';
 import clsx from 'clsx';
 import { capitalize } from 'lodash';
 import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/pricing';
 import { FAQComponent } from '@gitroom/frontend/components/billing/faq.component';
 import { useBillingFeatures } from '@gitroom/frontend/components/billing/first.billing.component';
 import { BillingHistory } from '@gitroom/frontend/components/billing/billing.history.component';
-import { useSWRConfig } from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
-import { Textarea } from '@gitroom/react/form/textarea';
 import { useFireEvents } from '@gitroom/helpers/utils/use.fire.events';
 import { useUtmUrl } from '@gitroom/helpers/utils/utm.saver';
 import { useTrack } from '@gitroom/react/helpers/use.track';
 import { TrackEnum } from '@gitroom/nestjs-libraries/user/track.enum';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { FinishTrial } from '@gitroom/frontend/components/billing/finish.trial';
-import { newDayjs } from '@gitroom/frontend/components/layout/set.timezone';
+import { fromUtc } from '@gitroom/frontend/components/layout/set.timezone';
+import { timer } from '@gitroom/helpers/utils/timer';
 import { useDubClickId } from '@gitroom/frontend/components/layout/dubAnalytics';
 import { LogoutComponent } from '@gitroom/frontend/components/layout/logout.component';
+import useCookie from 'react-use-cookie';
+import { usePaymentAction } from '@gitroom/frontend/components/billing/use.payment.action';
 
 type SubscriptionWithPlatform = Subscription & {
   platform?: 'web' | 'mobile';
@@ -69,6 +70,147 @@ export const Prorate: FC<{
   return (
     <div className="animate-fadeIn">
       {t('pay_today', 'Pay Today')} ${Math.max(price, 0).toFixed(2)}
+    </div>
+  );
+};
+
+const creditTypes = ['ai_images', 'ai_videos', 'clipping_minutes'] as const;
+
+const useLoadCredits = () => {
+  const fetch = useFetch();
+  return useCallback(
+    async (
+      type: (typeof creditTypes)[number]
+    ): Promise<{ credits: number }> => {
+      const response = await fetch(`/copilot/credits?type=${type}`);
+      if (!response.ok) {
+        throw new Error('Failed to load credits');
+      }
+      return response.json();
+    },
+    []
+  );
+};
+
+const useCredits = (type: (typeof creditTypes)[number]) => {
+  const loadCredits = useLoadCredits();
+  return useSWR<{ credits: number }>(
+    `/copilot/credits?type=${type}`,
+    () => loadCredits(type),
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+    }
+  );
+};
+
+const useRenewal = () => {
+  const fetch = useFetch();
+  return useSWR<{ renewsAt: number | null; trialing: boolean }>(
+    '/billing/renewal',
+    async () => {
+      const response = await fetch('/billing/renewal');
+      if (!response.ok) {
+        throw new Error('Failed to load renewal date');
+      }
+      return response.json();
+    },
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+    }
+  );
+};
+
+const BillingCycle: FC<{
+  tier: string;
+  canceled: boolean;
+}> = (props) => {
+  const { tier, canceled } = props;
+  const t = useT();
+  const { data: renewal } = useRenewal();
+  const { data: images } = useCredits('ai_images');
+  const { data: videos } = useCredits('ai_videos');
+  const { data: clipping } = useCredits('clipping_minutes');
+
+  const usage = [
+    {
+      label: t('billing_ai_images', 'AI images'),
+      total: pricing[tier]?.image_generation_count,
+      left: images?.credits,
+    },
+    {
+      label: t('billing_ai_videos', 'AI videos'),
+      total: pricing[tier]?.generate_videos,
+      left: videos?.credits,
+    },
+    {
+      label: t('billing_clipping_minutes', 'Clipping minutes'),
+      total: pricing[tier]?.clipping_minutes,
+      left: clipping?.credits,
+    },
+  ].filter((p) => p.total);
+
+  return (
+    <div className="flex items-center gap-[16px] rounded-[12px] border border-newTableBorder bg-newBgColorInner shadow-previewShadow px-[24px] py-[20px] mobile:flex-col mobile:items-stretch mobile:p-[16px]">
+      <div className="w-[48px] h-[48px] rounded-full bg-[#612bd3]/10 text-[#612bd3] flex items-center justify-center shrink-0 mobile:hidden">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" />
+        </svg>
+      </div>
+      <div className="flex-1 flex flex-col gap-[4px]">
+        <div className="text-[16px] font-[600]">
+          {t('billing_cycle', 'Billing cycle')}
+        </div>
+        <div className="text-[14px] text-textItemBlur">
+          {!canceled && !!renewal?.renewsAt && (
+            <>
+              {renewal.trialing
+                ? t(
+                    'billing_trial_ends_on',
+                    'Your free trial ends and your first payment is charged on'
+                  )
+                : t('billing_renews_on', 'Your plan renews on')}{' '}
+              <bdi className="font-[600] text-newTextColor">
+                {fromUtc(renewal.renewsAt * 1000).format('D MMM, YYYY')}
+              </bdi>
+              {'. '}
+            </>
+          )}
+          {t(
+            'billing_ai_credits_reset_monthly',
+            'AI credits reset every month.'
+          )}
+        </div>
+      </div>
+      <div className="flex gap-[8px] mobile:flex-col">
+        {usage.map((p) => (
+          <div
+            key={p.label}
+            className="flex flex-col gap-[2px] min-w-[120px] rounded-[8px] border border-newTableBorder px-[16px] py-[10px]"
+          >
+            <div className="text-[12px] text-textItemBlur">{p.label}</div>
+            <div className="text-[16px] font-[600]">
+              {typeof p.left === 'number' ? Math.max(p.left, 0) : '-'}
+              <span className="text-[14px] font-[400] text-textItemBlur">
+                {' / '}
+                {p.total}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -243,6 +385,7 @@ const Accept: FC<{ resolve: (res: boolean) => void }> = ({ resolve }) => {
   const [loading, setLoading] = useState(false);
   const fetch = useFetch();
   const toaster = useToaster();
+  const t = useT();
 
   const apply = useCallback(async () => {
     setLoading(true);
@@ -259,54 +402,18 @@ const Accept: FC<{ resolve: (res: boolean) => void }> = ({ resolve }) => {
       <div className="mb-[20px]">
         Would you accept 50% discount for 3 months instead? 🙏🏻
       </div>
+      <div className="mb-[20px] text-[14px] text-textItemBlur">
+        {t(
+          'billing_discount_modal_still_active',
+          'Your subscription is still active. Choose one of the options below to continue.'
+        )}
+      </div>
       <div className="flex gap-[10px]">
         <Button loading={loading} onClick={apply}>
           Apply 50% discount for 3 months
         </Button>
         <Button onClick={() => resolve(false)} className="!bg-red-800">
           Cancel my subscription
-        </Button>
-      </div>
-    </div>
-  );
-};
-const Info: FC<{
-  proceed: (feedback: string) => void;
-}> = (props) => {
-  const [feedback, setFeedback] = useState('');
-  const modal = useModals();
-  const events = useFireEvents();
-  const cancel = useCallback(() => {
-    props.proceed(feedback);
-    events('cancel_subscription');
-    modal.closeAll();
-  }, [modal, feedback]);
-
-  const t = useT();
-
-  return (
-    <div className="relative flex gap-[20px] flex-col flex-1 rounded-[4px]">
-      <div>
-        {t(
-          'would_you_mind_shortly_tell_us_what_we_could_have_done_better',
-          'Would you mind shortly tell us what we could have done better?'
-        )}
-      </div>
-      <div>
-        <Textarea
-          className="bg-newBgColorInner"
-          label={'Feedback'}
-          name="feedback"
-          disableForm={true}
-          value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
-        />
-      </div>
-      <div>
-        <Button disabled={feedback.length < 20} onClick={cancel}>
-          {feedback.length < 20
-            ? t('please_add_at_least', 'Please add at least 20 chars')
-            : t('cancel_subscription', 'Cancel Subscription')}
         </Button>
       </div>
     </div>
@@ -320,8 +427,12 @@ export const MainBillingComponent: FC<{
   const { mutate } = useSWRConfig();
   const fetch = useFetch();
   const toast = useToaster();
+  const paymentAction = usePaymentAction();
   const user = useUser();
   const dub = useDubClickId();
+  const [fbc] = useCookie('_fbc', '');
+  const [fbp] = useCookie('_fbp', '');
+  const events = useFireEvents();
   const modal = useModals();
   const router = useRouter();
   const utm = useUtmUrl();
@@ -332,9 +443,24 @@ export const MainBillingComponent: FC<{
     !!queryParams.get('finishTrial')
   );
 
-  const [subscription, setSubscription] = useState<SubscriptionWithPlatform | undefined>(
-    sub
-  );
+  const finishTrialNow = useCallback(async () => {
+    if (
+      await deleteDialog(
+        t(
+          'finish_trial_confirmation',
+          "Ending the trial charges your plan's first payment today instead of at the end of the trial. Continue?"
+        ),
+        t('finish_trial_charge_me_now', 'End trial and pay now'),
+        t('trial', 'Trial')
+      )
+    ) {
+      setFinishTrial(true);
+    }
+  }, []);
+
+  const [subscription, setSubscription] = useState<
+    SubscriptionWithPlatform | undefined
+  >(sub);
   const [loading, setLoading] = useState<boolean>(false);
   // which button started the request, so only that one shows a spinner
   const [clicked, setClicked] = useState('');
@@ -359,6 +485,34 @@ export const MainBillingComponent: FC<{
     }
     setSubscription(sub);
   }, [sub]);
+  const loadCredits = useLoadCredits();
+  // credits follow the plan stored by the Stripe webhook: wait for it, then
+  // show the new plan's totals and credits together
+  const showConfirmedPlan = useCallback(
+    async (billing: string, period: string, attempt = 0) => {
+      try {
+        const current = await (await fetch('/user/subscription')).json();
+        if (
+          current?.subscription?.subscriptionTier !== billing ||
+          current?.subscription?.period !== period
+        ) {
+          if (attempt < 9) {
+            await timer(1000);
+            return showConfirmedPlan(billing, period, attempt + 1);
+          }
+          return;
+        }
+        const credits = await Promise.all(creditTypes.map(loadCredits));
+        creditTypes.forEach((type, index) =>
+          mutate(`/copilot/credits?type=${type}`, credits[index], {
+            revalidate: false,
+          })
+        );
+        mutate('/user/subscription', current, { revalidate: false });
+      } catch (err) {}
+    },
+    []
+  );
   const updatePayment = useCallback(async () => {
     const { portal } = await (await fetch('/billing/portal')).json();
     window.location.href = portal;
@@ -383,12 +537,6 @@ export const MainBillingComponent: FC<{
           const { cancel_at } = await (
             await fetch('/billing/cancel', {
               method: 'POST',
-              body: JSON.stringify({
-                feedback: '',
-              }),
-              headers: {
-                'Content-Type': 'application/json',
-              },
             })
           ).json();
           setSubscription((subs) => ({
@@ -410,9 +558,23 @@ export const MainBillingComponent: FC<{
           !pricing[billing].team_members &&
           pricing[subscription?.subscriptionTier!]?.team_members
         ) {
-          messages.push(
-            `Your team members will be removed from your organization`
-          );
+          let hasMembers = true;
+          try {
+            const team = await (await fetch('/settings/team')).json();
+            hasMembers =
+              !Array.isArray(team?.users) ||
+              team.users.some(
+                (member: { user: { id: string } }) =>
+                  member.user.id !== user?.id
+              );
+          } catch (err: any) {
+            // keep the warning when the team cannot be loaded
+          }
+          if (hasMembers) {
+            messages.push(
+              `Your team members will be disabled and lose access to your organization until you upgrade to a plan that includes team members again`
+            );
+          }
         }
         if (billing === 'FREE') {
           if (
@@ -421,66 +583,70 @@ export const MainBillingComponent: FC<{
               `Are you sure you want to cancel your subscription?
               ${messages.join(', ')}`,
               'Yes, cancel',
-              'Cancel Subscription'
+              'Cancel Subscription',
+              'No, keep it'
             ))
           ) {
-            const checkDiscount = await (
-              await fetch('/billing/check-discount')
-            ).json();
-            if (checkDiscount.offerCoupon) {
-              const info = await new Promise((res) => {
-                modal.openModal({
-                  title: 'Before you cancel',
-                  withCloseButton: true,
-                  classNames: {
-                    modal: 'bg-transparent text-textColor',
-                  },
-                  children: <Accept resolve={res} />,
+            try {
+              const checkDiscount = await (
+                await fetch('/billing/check-discount')
+              ).json();
+              if (checkDiscount.offerCoupon) {
+                const info = await new Promise((res) => {
+                  modal.openModal({
+                    title: 'Before you cancel',
+                    withCloseButton: true,
+                    onClose: () => {
+                      toast.show(
+                        t(
+                          'billing_subscription_not_cancelled',
+                          'Your subscription was not cancelled'
+                        ),
+                        'warning'
+                      );
+                      res(true);
+                    },
+                    classNames: {
+                      modal: 'bg-transparent text-textColor',
+                    },
+                    children: <Accept resolve={res} />,
+                  });
                 });
-              });
 
-              modal.closeAll();
+                modal.closeAll();
 
-              if (info) {
-                return;
+                if (info) {
+                  return;
+                }
               }
-            }
 
-            const info = await new Promise((res) => {
-              modal.openModal({
-                title: t(
-                  'we_are_sorry_to_see_you_go',
-                  'We are sorry to see you go :('
-                ),
-                withCloseButton: true,
-                classNames: {
-                  modal: 'bg-transparent text-textColor',
-                },
-                children: <Info proceed={(e) => res(e)} />,
-              });
-            });
-
-            setLoading(true);
-            const { cancel_at } = await (
-              await fetch('/billing/cancel', {
+              events('cancel_subscription');
+              setLoading(true);
+              const response = await fetch('/billing/cancel', {
                 method: 'POST',
-                body: JSON.stringify({
-                  feedback: info,
-                }),
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-              })
-            ).json();
-            setSubscription((subs) => ({
-              ...subs!,
-              cancelAt: cancel_at,
-            }));
-            toast.show(
-              cancel_at
-                ? 'Subscription set to canceled successfully'
-                : 'Your subscription was already set to cancel, so it has been reactivated. Click Cancel subscription again to cancel it.'
-            );
+              });
+              if (!response.ok) {
+                throw new Error(`status ${response.status}`);
+              }
+              const { cancel_at } = await response.json();
+              setSubscription((subs) => ({
+                ...subs!,
+                cancelAt: cancel_at,
+              }));
+              toast.show(
+                cancel_at
+                  ? 'Subscription set to canceled successfully'
+                  : 'Your subscription was already set to cancel, so it has been reactivated. Click Cancel subscription again to cancel it.'
+              );
+            } catch (err) {
+              toast.show(
+                t(
+                  'billing_cancel_failed',
+                  'We could not cancel your subscription. Please try again or contact support.'
+                ),
+                'warning'
+              );
+            }
             setLoading(false);
           }
           return;
@@ -492,7 +658,7 @@ export const MainBillingComponent: FC<{
           return;
         }
         setLoading(true);
-        const { url, portal, blocked } = await (
+        const { url, portal, blocked, requiresAction, clientSecret } = await (
           await fetch('/billing/subscribe', {
             method: 'POST',
             body: JSON.stringify({
@@ -500,6 +666,8 @@ export const MainBillingComponent: FC<{
               utm,
               billing,
               ...(dub ? { dub } : {}),
+              ...(fbc ? { fbc } : {}),
+              ...(fbp ? { fbp } : {}),
             }),
           })
         ).json();
@@ -521,6 +689,7 @@ export const MainBillingComponent: FC<{
               pricing[billing][
                 monthlyOrYearly === 'on' ? 'year_price' : 'month_price'
               ],
+            currency: 'USD',
           });
           window.location.href = url;
           return;
@@ -536,6 +705,14 @@ export const MainBillingComponent: FC<{
             window.open(portal);
           }
         } else {
+          if (requiresAction) {
+            const { error } = await paymentAction(clientSecret);
+            if (error) {
+              toast.show(error, 'warning');
+              setLoading(false);
+              return;
+            }
+          }
           setPeriod(monthlyOrYearly === 'on' ? 'YEARLY' : 'MONTHLY');
           setSubscription((subs) => ({
             ...subs!,
@@ -553,11 +730,16 @@ export const MainBillingComponent: FC<{
             }
           );
           mutate('/billing/invoices');
+          mutate('/billing/renewal');
+          showConfirmedPlan(
+            billing,
+            monthlyOrYearly === 'on' ? 'YEARLY' : 'MONTHLY'
+          );
           toast.show('Subscription updated successfully');
         }
         setLoading(false);
       },
-    [monthlyOrYearly, subscription, user, utm]
+    [monthlyOrYearly, subscription, user, utm, paymentAction]
   );
   if (user?.isLifetime) {
     router.replace('/');
@@ -611,10 +793,7 @@ export const MainBillingComponent: FC<{
       return {
         label: subscription?.cancelAt
           ? t('billing_downgrade_on', 'Downgrade on {{date}}', {
-              date: dayjs
-                .utc(subscription.cancelAt)
-                .local()
-                .format('D MMM, YYYY'),
+              date: fromUtc(subscription.cancelAt).format('D MMM, YYYY'),
             })
           : t('cancel_subscription_1', 'Cancel subscription'),
         onClick: moveToCheckout('FREE'),
@@ -642,7 +821,16 @@ export const MainBillingComponent: FC<{
 
   return (
     <div className="flex flex-col gap-[24px]">
-      {finishTrial && <FinishTrial close={() => setFinishTrial(false)} />}
+      {finishTrial && (
+        <FinishTrial
+          close={() => {
+            setFinishTrial(false);
+            mutate('/user/self');
+            mutate('/billing/invoices');
+            mutate('/billing/renewal');
+          }}
+        />
+      )}
       <div className="flex items-center gap-[16px] mobile:flex-col mobile:items-stretch">
         <div className="flex-1 flex flex-col gap-[4px]">
           <div className="text-[20px] font-[600]">
@@ -688,7 +876,7 @@ export const MainBillingComponent: FC<{
               'Your subscription will be canceled at'
             )}{' '}
             <bdi className="font-[600]">
-              {newDayjs(subscription.cancelAt).local().format('D MMM, YYYY')}
+              {fromUtc(subscription.cancelAt).format('D MMM, YYYY')}
             </bdi>
             {'. '}
             {t(
@@ -738,6 +926,12 @@ export const MainBillingComponent: FC<{
           );
         })}
       </div>
+      {!!subscription?.id && (
+        <BillingCycle
+          tier={sub?.subscriptionTier || subscription.subscriptionTier}
+          canceled={!!subscription.cancelAt}
+        />
+      )}
       {!!subscription?.id && (
         <div className="flex items-center gap-[16px] rounded-[12px] border border-newTableBorder bg-newBgColorInner shadow-previewShadow px-[24px] py-[20px] mobile:flex-col mobile:items-stretch mobile:p-[16px]">
           <div className="w-[48px] h-[48px] rounded-full bg-[#612bd3]/10 text-[#612bd3] flex items-center justify-center shrink-0 mobile:hidden">
@@ -797,6 +991,15 @@ export const MainBillingComponent: FC<{
             >
               {t('billing_update_payment_method', 'Update payment method')}
             </button>
+            {user?.isTrailing && !subscription?.cancelAt && (
+              <button
+                type="button"
+                onClick={finishTrialNow}
+                className="h-[44px] px-[16px] rounded-[8px] bg-btnSimple text-btnText text-[14px] font-[500] hover:opacity-80 transition-opacity"
+              >
+                {t('finish_trial_charge_me_now', 'End trial and pay now')}
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -62,6 +62,11 @@ export async function proxy(request: NextRequest) {
     return topResponse;
   }
 
+  // the page of a connect link (public API), opened by people with no account
+  if (nextUrl.pathname.startsWith('/integrations/connect/')) {
+    return topResponse;
+  }
+
   // If the URL is logout, delete the cookie and redirect to login
   if (nextUrl.href.indexOf('/auth/logout') > -1) {
     const response = NextResponse.redirect(
@@ -125,7 +130,7 @@ export async function proxy(request: NextRequest) {
               domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
             }
           : {}),
-        expires: new Date(Date.now() + 15 * 60 * 1000),
+        expires: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
       });
       return redirect;
     }
@@ -155,7 +160,7 @@ export async function proxy(request: NextRequest) {
                 domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
               }
             : {}),
-          expires: new Date(Date.now() + 15 * 60 * 1000),
+          expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365),
         });
       }
       return redirect;
