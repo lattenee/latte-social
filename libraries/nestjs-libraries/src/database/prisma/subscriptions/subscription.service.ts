@@ -66,11 +66,17 @@ export class SubscriptionService {
       return false;
     }
 
-    await this.modifySubscriptionByOrg(
+    // Downgrade entitlements first: deleting the row while the workspace is
+    // still entitled would leave paid-level channels running with no
+    // subscription to justify them.
+    const load = await this.modifySubscriptionByOrg(
       organizationId,
       pricing.FREE.channel || 0,
       'FREE'
     );
+    if (!load) {
+      return false;
+    }
     return this._subscriptionRepository.deleteSubscriptionByOrgId(
       organizationId,
       provider
@@ -98,19 +104,29 @@ export class SubscriptionService {
     );
   }
 
+  // `previous` lets the caller pass the subscription row as it was BEFORE a
+  // guarded write: createOrUpdateSubscriptionByOrg writes the row first and
+  // only then reconciles entitlements, so reading the row inside this method
+  // would diff the plan against itself and skip the channel/member changes.
   async modifySubscriptionByOrg(
     organizationId: string,
     totalChannels: number,
-    billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE'
+    billing: 'FREE' | 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    previous?: {
+      subscriptionTier: string | null;
+      totalChannels: number;
+    } | null
   ) {
     if (!organizationId) {
       return false;
     }
 
     const getCurrentSubscription =
-      (await this._subscriptionRepository.getSubscriptionByOrgId(
-        organizationId
-      ))!;
+      previous !== undefined
+        ? previous
+        : ((await this._subscriptionRepository.getSubscriptionByOrgId(
+            organizationId
+          ))!);
 
     const from = pricing[getCurrentSubscription?.subscriptionTier || 'FREE'];
     const to = pricing[billing];
@@ -307,7 +323,9 @@ export class SubscriptionService {
     cancelAt: number | null
   ) {
     // Fast-path check only — the authoritative guard is the provider-scoped
-    // write below, which can't be raced the way this precheck could.
+    // write below, which can't be raced the way this precheck could. The row
+    // is also the entitlement baseline modifySubscriptionByOrg diffs
+    // against, so it is captured before the write replaces it.
     const current = await this._subscriptionRepository.getSubscriptionByOrgId(
       organizationId
     );
@@ -315,20 +333,10 @@ export class SubscriptionService {
       return {};
     }
 
-    try {
-      const load = await this.modifySubscriptionByOrg(
-        organizationId,
-        totalChannels,
-        billing
-      );
-      if (!load) {
-        return {};
-      }
-    } catch (e) {
-      console.error('Error modifying subscription:', e);
-      return {};
-    }
-
+    // Ownership write BEFORE entitlement mutation: losing this race means
+    // another provider owns the row and nothing must change — running the
+    // modify first would let a rejected plan disable/enable channels and
+    // members anyway.
     const written =
       await this._subscriptionRepository.upsertSubscriptionByOrgProvider(
         provider,
@@ -340,7 +348,27 @@ export class SubscriptionService {
         period,
         cancelAt
       );
-    return written === 'conflict' ? {} : written;
+    if (written === 'conflict') {
+      return {};
+    }
+
+    try {
+      const load = await this.modifySubscriptionByOrg(
+        organizationId,
+        totalChannels,
+        billing,
+        current
+      );
+      if (!load) {
+        return {};
+      }
+    } catch (e) {
+      // The row is written but channels/members may lag: a retry is
+      // idempotent (same provider passes the write again) and converges
+      // them, so log instead of throwing past a webhook-safe boundary.
+      console.error('Error modifying subscription:', e);
+    }
+    return written;
   }
 
   getSubscriptionByIdentifier(identifier: string) {

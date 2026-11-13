@@ -29,6 +29,7 @@ import {
   mcpConnectorUrls,
 } from '@gitroom/frontend/components/public-api/public.component';
 import { McpClientIcon } from '@gitroom/frontend/components/public-api/mcp.client.icons';
+import { persistOnboardingComplete } from '@gitroom/frontend/components/onboarding/onboarding.finish';
 
 interface OnboardingModalProps {
   onClose: () => void;
@@ -52,9 +53,7 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
       // Persist workspace-scoped completion before closing so onboarding does
       // not reappear on the next login; a failure keeps the modal open with
       // a retry path instead of silently discarding the record.
-      await fetch('/user/onboarding/complete', { method: 'POST' });
-      // Re-read /user/self so the persisted onboardedAt gates future loads.
-      await mutate('/user/self');
+      await persistOnboardingComplete(fetch, mutate);
       onClose();
     } catch (e) {
       toaster.show(

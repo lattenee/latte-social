@@ -210,26 +210,31 @@ export class SubscriptionRepository {
       return 'conflict' as const;
     }
 
+    // The unique constraint on organizationId is the last guard: if a
+    // concurrent writer (payment webhook, second admin call) created the
+    // row between the check above and this create, report a conflict
+    // instead of overwriting or exploding. Only the create sits inside the
+    // conflict classifier - an organization update failure after a
+    // successful create is a real error to surface, not an ownership
+    // conflict (a retry then heals through the updateMany path above).
+    let created;
     try {
-      const created = await this._subscription.model.subscription.create({
+      created = await this._subscription.model.subscription.create({
         data: { organizationId, ...writable },
       });
-      await this._organization.model.organization.update({
-        where: { id: organizationId },
-        data: { isTrailing, allowTrial: false },
-      });
-      return created;
     } catch (err) {
-      // The unique constraint on organizationId is the last guard: if a
-      // concurrent writer (payment webhook, second admin call) created the
-      // row between the check above and this create, report a conflict
-      // instead of overwriting or exploding.
       const raced = await this.getSubscriptionByOrgId(organizationId);
       if (raced) {
         return 'conflict' as const;
       }
       throw err;
     }
+
+    await this._organization.model.organization.update({
+      where: { id: organizationId },
+      data: { isTrailing, allowTrial: false },
+    });
+    return created;
   }
 
   async createOrUpdateSubscription(
