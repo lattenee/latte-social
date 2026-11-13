@@ -468,6 +468,22 @@ describe('ZaloProvider pending/duplicate-safety contract', () => {
       confirmed: true,
     };
 
+    it('does not replay article/create after an ambiguous HTTP 500', async () => {
+      // Exercise the real inherited HTTP helper, not mockFetch: that helper
+      // normally retries 500 responses even for mutating POST requests.
+      const request = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('upstream failed after accepting article', { status: 500 })
+      );
+      try {
+        await expect(
+          provider.finalizePost('token', confirmed as any, INTEGRATION)
+        ).rejects.toBeInstanceOf(BadBody);
+        expect(request).toHaveBeenCalledTimes(1);
+      } finally {
+        request.mockRestore();
+      }
+    });
+
     it('text create payload carries type:normal and body blocks', async () => {
       const calls = mockFetch(provider, {
         '/article/create': { error: 0, token: 't' },

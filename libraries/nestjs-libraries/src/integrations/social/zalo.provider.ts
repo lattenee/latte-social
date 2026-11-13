@@ -442,7 +442,11 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
         },
         body: JSON.stringify(body),
       },
-      this.identifier
+      this.identifier,
+      // Never let SocialAbstract.fetch replay this irreversible POST on
+      // HTTP 500/429. A failed response can follow a successful mutation;
+      // the durable handshake must park it for manual reconciliation.
+      3
     );
 
     const { error, message, token } = await response.json();
