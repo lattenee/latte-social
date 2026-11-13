@@ -299,13 +299,15 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
       );
     }
 
-    const stream = await this.mediaStream(videoPath, this.identifier);
-    const formData = new FormData();
-    formData.append('file', stream, {
-      filename: videoPath.split('/').at(-1) || 'video.mp4',
-    });
-
+    // The stream and FormData live inside the factory: runStreamedUpload
+    // retries on 429/5xx, and a retried request must re-open the media -
+    // a stream consumed by the failed attempt would send an empty body.
     const { error, message, data } = await this.runStreamedUpload(async () => {
+      const stream = await this.mediaStream(videoPath, this.identifier);
+      const formData = new FormData();
+      formData.append('file', stream, {
+        filename: videoPath.split('/').at(-1) || 'video.mp4',
+      });
       const response = await this.getSsrfSafeAxios().post(
         `${ZALO_API}/article/upload_video/preparevideo`,
         formData,
@@ -464,7 +466,13 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
       const cutoff = dayjs().subtract(1, 'hour').valueOf();
       const match = (data?.medias || []).find(
         (m: any) =>
-          m.title === draft.title && Number(m.create_date || 0) >= cutoff
+          m.title === draft.title &&
+          // two posts sharing a 150-char title prefix are still different
+          // articles - when getslice returns the description, it must match
+          // too; absent in the list response it can't disqualify the match
+          (m.description === undefined ||
+            m.description === draft.description) &&
+          Number(m.create_date || 0) >= cutoff
       );
       if (!match) {
         return undefined;
@@ -523,24 +531,40 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
     const video = firstPost.media?.find((m) => m.type === 'video');
     const image = firstPost.media?.find((m) => m.type === 'image');
 
-    // Article covers/avatars are fetched by Zalo server-side, so only already-
-    // public URLs work. Covers skip attached images over the 1MB cap (Zalo
-    // would reject the create otherwise) and fall back to the OA avatar,
-    // which is a small already-public image; the avatar field for video
-    // articles prefers the image thumbnail, then the image, then the OA
-    // avatar.
+    // Article covers/avatars are fetched by Zalo server-side, so only public
+    // URLs work: locally-stored media carries a disk path in `path` and its
+    // fetchable URL in `url` (see PostsService.updateMedia).
+    const publicUrl = (m: { path?: string; url?: string } | undefined) => {
+      const url = (m as any)?.url;
+      if (typeof url === 'string' && url.indexOf('http') === 0) {
+        return url;
+      }
+      return m?.path?.indexOf('http') === 0 ? m.path : undefined;
+    };
+
+    // Covers skip attached images over the 1MB cap (Zalo would reject the
+    // create otherwise) and fall back to the OA avatar, which is a small
+    // already-public image; the avatar field for video articles prefers the
+    // image thumbnail, then the image, then the OA avatar.
+    const imageUrl = publicUrl(image);
     let coverUrl: string | undefined;
-    if (image) {
-      const size = await this.mediaSize(image.path, this.identifier);
-      if (size <= MAX_COVER_BYTES) {
-        coverUrl = image.path;
+    if (image && imageUrl) {
+      try {
+        const size = await this.mediaSize(image.path, this.identifier);
+        if (size <= MAX_COVER_BYTES) {
+          coverUrl = imageUrl;
+        }
+      } catch (err) {
+        // An unmeasurable image must not kill the publish - skip the cover
+        // rather than letting Zalo reject the whole create for it.
+        coverUrl = undefined;
       }
     }
     const draft = this.buildDraft(
       firstPost,
       integration.name || '',
       coverUrl || integration.picture || undefined,
-      image?.thumbnail || image?.path || integration.picture || undefined
+      imageUrl || integration.picture || undefined
     );
 
     if (video) {
