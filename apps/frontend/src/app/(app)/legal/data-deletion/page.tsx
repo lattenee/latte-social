@@ -24,10 +24,13 @@ export default function DataDeletionPage() {
           may email you for confirmation first.
         </li>
         <li>
-          We delete the account, its OAuth tokens, posts, media and
-          analytics records. Platform-side copies (posts already published
-          to Facebook, Instagram, Zalo, etc.) are not removed - delete them
-          on the platform if needed.
+          An operator deletes the account record and removes connected
+          channel tokens, posts and analytics records from the Service&apos;s
+          database. Uploaded media files held in object storage are purged
+          separately by the operator and may take additional time. Copies on
+          the platforms themselves (posts already published to Facebook,
+          Instagram, Zalo, etc.) are not removed - delete them on the
+          platform if needed.
         </li>
         <li>We aim to complete requests within 30 days.</li>
       </ol>

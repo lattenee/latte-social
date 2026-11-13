@@ -47,14 +47,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Install SARIF formatter
-        run: npm install --no-save @microsoft/eslint-formatter-sarif@2.1.7
-
       - name: Run ESLint
         env:
-          # The repo pins eslint 8, which reads flat config only behind this flag
+          # The repo pins eslint 8, which reads flat config only behind this
+          # flag. Flat config does not accept --ext; the file globs live in
+          # eslint.config.mjs. The SARIF formatter is a pinned devDependency,
+          # so no runtime npm install is needed here.
           ESLINT_USE_FLAT_CONFIG: 'true'
-        run: pnpm exec eslint apps libraries --ext .ts,.tsx --format @microsoft/eslint-formatter-sarif --output-file eslint-results.sarif
+        run: pnpm exec eslint apps libraries --format @microsoft/eslint-formatter-sarif --output-file eslint-results.sarif
         continue-on-error: true
 
       - name: Upload analysis results to GitHub

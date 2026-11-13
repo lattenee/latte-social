@@ -18,6 +18,8 @@ import { DataDeletionService } from '@gitroom/nestjs-libraries/database/prisma/d
 import dayjs from 'dayjs';
 
 const MANUAL_PLAN_TIERS = ['STANDARD', 'TEAM', 'PRO', 'ULTIMATE'] as const;
+// A manual plan's channel cap stays inside what any built-in tier allows.
+const MAX_MANUAL_PLAN_CHANNELS = 100;
 
 @ApiTags('Admin')
 @Controller('/admin')
@@ -31,8 +33,32 @@ export class AdminController {
 
   private assertSuperAdmin(user: User) {
     if (!user?.isSuperAdmin) {
-      throw new HttpException('Unauthorized', 400);
+      // 403, not 400: the caller is authenticated, just not a super admin.
+      throw new HttpException('Forbidden', 403);
     }
+  }
+
+  // Query params arrive as strings; malformed numbers are a 400, never a
+  // silent NaN/negative reaching the service.
+  private parsePagination(page?: string, limit?: string) {
+    const out = { page: 0, limit: 20 };
+    if (page !== undefined) {
+      if (!/^\d+$/.test(page)) {
+        throw new HttpException('page must be a non-negative integer', 400);
+      }
+      out.page = parseInt(page, 10);
+    }
+    if (limit !== undefined) {
+      if (!/^\d+$/.test(limit)) {
+        throw new HttpException('limit must be a positive integer', 400);
+      }
+      const parsed = parseInt(limit, 10);
+      if (parsed < 1 || parsed > 200) {
+        throw new HttpException('limit must be between 1 and 200', 400);
+      }
+      out.limit = parsed;
+    }
+    return out;
   }
 
   @Get('/errors')
@@ -45,9 +71,9 @@ export class AdminController {
     @Query('unknownFirst') unknownFirst?: string
   ) {
     this.assertSuperAdmin(user);
+    const pagination = this.parsePagination(page, limit);
     return this._errorsService.listErrors({
-      page: page ? parseInt(page, 10) : 0,
-      limit: limit ? parseInt(limit, 10) : 20,
+      ...pagination,
       platform: platform || undefined,
       email: email || undefined,
       unknownFirst: unknownFirst === 'true' || unknownFirst === '1',
@@ -99,7 +125,15 @@ export class AdminController {
   ) {
     this.assertSuperAdmin(user);
 
-    const tier = (body?.tier || '').toUpperCase();
+    // Bodies are untyped JSON: tier/period may be numbers/objects/null, so
+    // toUpperCase is only safe after an explicit string check.
+    if (typeof body?.tier !== 'string' || !body.tier.trim()) {
+      throw new HttpException(
+        `tier must be one of ${MANUAL_PLAN_TIERS.join(', ')}`,
+        400
+      );
+    }
+    const tier = body.tier.trim().toUpperCase();
     if (
       !MANUAL_PLAN_TIERS.includes(tier as (typeof MANUAL_PLAN_TIERS)[number])
     ) {
@@ -108,14 +142,31 @@ export class AdminController {
         400
       );
     }
-    const period = (body?.period || 'YEARLY').toUpperCase();
+    if (
+      body?.period !== undefined &&
+      (typeof body.period !== 'string' || !body.period.trim())
+    ) {
+      throw new HttpException('period must be MONTHLY or YEARLY', 400);
+    }
+    const period = (
+      typeof body?.period === 'string' ? body.period.trim() : 'YEARLY'
+    ).toUpperCase();
     if (period !== 'MONTHLY' && period !== 'YEARLY') {
       throw new HttpException('period must be MONTHLY or YEARLY', 400);
     }
+    if (
+      body?.totalChannels !== undefined &&
+      (!Number.isInteger(body.totalChannels) ||
+        body.totalChannels < 1 ||
+        body.totalChannels > MAX_MANUAL_PLAN_CHANNELS)
+    ) {
+      throw new HttpException(
+        `totalChannels must be an integer between 1 and ${MAX_MANUAL_PLAN_CHANNELS}`,
+        400
+      );
+    }
     const totalChannels =
-      typeof body?.totalChannels === 'number' && body.totalChannels > 0
-        ? Math.floor(body.totalChannels)
-        : 8;
+      typeof body?.totalChannels === 'number' ? body.totalChannels : 8;
 
     const result =
       await this._subscriptionService.createOrUpdateSubscriptionByOrg(
@@ -160,9 +211,10 @@ export class AdminController {
     @Query('limit') limit?: string
   ) {
     this.assertSuperAdmin(user);
+    const pagination = this.parsePagination(page, limit);
     return this._dataDeletionService.listOpen(
-      page ? parseInt(page, 10) : 0,
-      limit ? parseInt(limit, 10) : 20
+      pagination.page,
+      pagination.limit
     );
   }
 

@@ -22,25 +22,32 @@ If unset, the pages render a visible "not configured" notice instead of
 fabricated facts. Deletion requests persist to `DataDeletionRequest` and are
 actionable by a super-admin via `GET /admin/deletion-requests` +
 `POST /admin/deletion-requests/:id/resolve`. The human steps are described
-on the page (verify ownership, delete account + tokens + posts + media +
-analytics, ≤30 days); nothing auto-deletes on submission.
+on the page (verify ownership, delete the account record + tokens + posts +
+analytics, separately purge uploaded media in object storage, ≤30 days);
+nothing auto-deletes on submission, and `deleteOrganization` currently
+soft-deletes (`deletedAt`), so an operator must also remove the underlying
+rows to complete a real deletion request.
 
 ## OAuth scope audit (least privilege)
 
-The integration registry only enables providers whose `scopes` match
-implemented functionality:
+The integration registry enables two Meta providers plus the standalone
+Instagram login. Each provider's `scopes` array in `*.provider.ts` is the
+source of truth; the table below mirrors the code as of this writing.
 
-| Provider | Declared scopes | Used for | Trimmed? |
+| Provider (`identifier`) | Declared scopes | Used for | Notes |
 | --- | --- | --- | --- |
-| Facebook page | `pages_show_list`, `pages_manage_posts`, `pages_read_engagement`, `business_management` (required by Meta for Page tokens) | Page listing, post publish, engagement analytics | Review against Meta's current required set at submission |
-| Instagram | `instagram_business_basic`, `instagram_business_content_publish` | Content publishing + basic analytics | OK — no messaging/comment scopes |
-| Zalo OA | none (permission link grants at OA level) | Article publish + counters | OK |
+| Facebook Page (`facebook`, `facebook.provider.ts`) | `pages_show_list`, `pages_manage_posts`, `pages_manage_engagement`, `pages_read_engagement`, `read_insights`, `business_management` | Page listing (incl. pages owned/cliented through Business Manager via `me/businesses` + `owned_pages`/`client_pages`), post publish, comments/replies, engagement + page/post/video insights | `pages_manage_engagement` and `read_insights` back the comments and `analytics()`/`video_insights` calls; `business_management` is only for Business-Manager page discovery, not a blanket Meta requirement |
+| Instagram — Facebook Business (`instagram`, `instagram.provider.ts`) | `instagram_basic`, `instagram_content_publish`, `instagram_manage_comments`, `instagram_manage_insights`, `pages_show_list`, `pages_read_engagement`, `business_management` | Publishing to an IG Business account attached to a Facebook Page, comments, insights | Uses the `instagram_*` permission namespace (Facebook-login flow). These are distinct scopes from `instagram_business_*` below and each needs its own App Review item |
+| Instagram — Standalone (`instagram-standalone`, `instagram.standalone.provider.ts`) | `instagram_business_basic`, `instagram_business_content_publish`, `instagram_business_manage_comments`, `instagram_business_manage_insights` | Direct Instagram-login publish, comments, insights | `instagram_business_*` namespace only |
+| Zalo OA (`zalo`) | none (permission link grants at OA level) | Article publish + counters | OK |
 | Other enabled providers | provider-specific publish + read scopes | Publish + analytics only | Each provider's `scopes` field in `*.provider.ts` is the source of truth |
 
-Method: `grep -n "scopes" libraries/nestjs-libraries/src/integrations/social/*.provider.ts`
+Method: `rg -n "scopes" libraries/nestjs-libraries/src/integrations/social/*.provider.ts`
 and compare each entry with the features actually implemented in the same
-file (`post`/`postPending`/`postAnalytics`). Before submitting App Review,
-re-run that audit and drop any scope with no implementing feature.
+file (`post`/`postPending`/`postAnalytics`/`comment`). Before submitting App
+Review, re-run that audit and drop any scope with no implementing feature —
+do not strip a scope that code still calls, since `checkScopes` verifies the
+granted set at connect time.
 
 ## Reviewer / demo setup
 

@@ -19,6 +19,7 @@ export const UserContext = createContext<
       allowTrial: boolean;
       isTrailing: boolean;
       streakSince: string | null;
+      onboardedAt: string | null;
     })
 >(undefined);
 export const ContextWrapper: FC<{
@@ -28,6 +29,7 @@ export const ContextWrapper: FC<{
     role: 'USER' | 'ADMIN' | 'SUPERADMIN';
     publicApi: string;
     totalChannels: number;
+    onboardedAt: string | null;
   };
   children: ReactNode;
 }> = ({ user, children }) => {

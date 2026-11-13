@@ -333,6 +333,11 @@ export const MenuComponent: FC<
       changeProfilePicture: boolean;
       changeNickName: boolean;
       refreshNeeded?: boolean;
+      connectionState?:
+        | 'connected'
+        | 'needs_reconnect'
+        | 'incomplete'
+        | 'disabled';
     };
   }
 > = (props) => {
@@ -353,6 +358,23 @@ export const MenuComponent: FC<
       id: integration.id,
     },
   }));
+  const connectionState =
+    integration.connectionState ||
+    (integration.disabled
+      ? 'disabled'
+      : integration.refreshNeeded
+      ? 'needs_reconnect'
+      : integration.inBetweenSteps
+      ? 'incomplete'
+      : 'connected');
+  const connectionLabel =
+    connectionState === 'needs_reconnect'
+      ? t('connection_needs_reconnect', 'Reconnect needed')
+      : connectionState === 'incomplete'
+      ? t('connection_incomplete', 'Setup incomplete')
+      : connectionState === 'disabled'
+      ? t('connection_disabled', 'Disabled')
+      : null;
   return (
     <div
       // @ts-ignore
@@ -451,7 +473,21 @@ export const MenuComponent: FC<
           integration.disabled && 'opacity-50'
         )}
       >
-        {integration.name}
+        <div className="whitespace-nowrap text-ellipsis overflow-hidden">
+          {integration.name}
+        </div>
+        {connectionLabel && (
+          <div
+            className={clsx(
+              'text-[11px] leading-[14px]',
+              connectionState === 'needs_reconnect'
+                ? 'text-red-500'
+                : 'text-textItemBlur'
+            )}
+          >
+            {connectionLabel}
+          </div>
+        )}
       </div>
       <Menu
         canChangeProfilePicture={integration.changeProfilePicture}

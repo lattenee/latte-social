@@ -8,7 +8,7 @@ export default function TermsPage() {
   return (
     <>
       <h1 className="text-[28px] font-semibold">Terms of Service</h1>
-      <p className="text-white/60 text-[13px]">Last updated: 2026-02-01</p>
+      <p className="text-white/60 text-[13px]">Last updated: 2026-11-13</p>
 
       {!operator || !contact ? (
         <p className="text-[#FC69FF]">

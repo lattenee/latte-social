@@ -2,7 +2,8 @@
 
 import React, { FC, Fragment, useCallback, useMemo, useState } from 'react';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import useSWR from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
+import { useToaster } from '@gitroom/react/toaster/toaster';
 import { orderBy } from 'lodash';
 import clsx from 'clsx';
 import SafeImage from '@gitroom/react/helpers/safe.image';
@@ -35,16 +36,38 @@ interface OnboardingModalProps {
 
 export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
   const [step, setStep] = useState(1);
+  const [finishing, setFinishing] = useState(false);
   const modals = useModals();
   const t = useT();
   const fetch = useFetch();
+  const { mutate } = useSWRConfig();
+  const toaster = useToaster();
 
-  const handleFinish = useCallback(() => {
-    // Best-effort marker that first-run onboarding finished; gating on it is
-    // a product decision for later, so a failed call must not block closing.
-    fetch('/user/onboarding/complete', { method: 'POST' }).catch(() => {});
-    onClose();
-  }, [fetch, onClose]);
+  const handleFinish = useCallback(async () => {
+    if (finishing) {
+      return;
+    }
+    setFinishing(true);
+    try {
+      // Persist workspace-scoped completion before closing so onboarding does
+      // not reappear on the next login; a failure keeps the modal open with
+      // a retry path instead of silently discarding the record.
+      await fetch('/user/onboarding/complete', { method: 'POST' });
+      // Re-read /user/self so the persisted onboardedAt gates future loads.
+      await mutate('/user/self');
+      onClose();
+    } catch (e) {
+      toaster.show(
+        t(
+          'onboarding_finish_failed',
+          'Could not save your progress. Please try again.'
+        ),
+        'warning'
+      );
+    } finally {
+      setFinishing(false);
+    }
+  }, [fetch, finishing, mutate, onClose, t, toaster]);
 
   const steps = useMemo(
     () => [
@@ -129,6 +152,7 @@ export const OnboardingModal: FC<OnboardingModalProps> = ({ onClose }) => {
               <OnboardingStep3
                 onBack={() => setStep(2)}
                 onFinish={handleFinish}
+                finishing={finishing}
               />
             )}
           </div>
@@ -716,10 +740,11 @@ const OnboardingStep2: FC<{ onBack: () => void; onNext: () => void }> = ({
   );
 };
 
-const OnboardingStep3: FC<{ onBack: () => void; onFinish: () => void }> = ({
-  onBack,
-  onFinish,
-}) => {
+const OnboardingStep3: FC<{
+  onBack: () => void;
+  onFinish: () => void;
+  finishing: boolean;
+}> = ({ onBack, onFinish, finishing }) => {
   const t = useT();
 
   return (
@@ -774,9 +799,12 @@ const OnboardingStep3: FC<{ onBack: () => void; onFinish: () => void }> = ({
         </button>
         <button
           onClick={onFinish}
-          className="group flex items-center gap-[12px] bg-gradient-to-r from-[#10b981] to-[#059669] hover:from-[#34d399] hover:to-[#10b981] text-white font-semibold px-[32px] py-[14px] rounded-[12px] text-[16px] transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40"
+          disabled={finishing}
+          className="group flex items-center gap-[12px] bg-gradient-to-r from-[#10b981] to-[#059669] hover:from-[#34d399] hover:to-[#10b981] disabled:opacity-60 text-white font-semibold px-[32px] py-[14px] rounded-[12px] text-[16px] transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40"
         >
-          {t('get_started', 'Get Started')}
+          {finishing
+            ? t('saving', 'Saving...')
+            : t('get_started', 'Get Started')}
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="20"

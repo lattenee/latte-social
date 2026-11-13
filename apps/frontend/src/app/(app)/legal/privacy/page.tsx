@@ -8,7 +8,7 @@ export default function PrivacyPage() {
   return (
     <>
       <h1 className="text-[28px] font-semibold">Privacy Policy</h1>
-      <p className="text-white/60 text-[13px]">Last updated: 2026-02-01</p>
+      <p className="text-white/60 text-[13px]">Last updated: 2026-11-13</p>
 
       {!operator || !contact ? (
         <p className="text-[#FC69FF]">
@@ -38,8 +38,9 @@ export default function PrivacyPage() {
           Connected channel data: OAuth tokens, channel names, profile
           pictures and public identifiers for the social accounts you
           explicitly connect (Facebook Pages, Instagram accounts, Zalo OAs
-          and others you choose). Tokens are stored encrypted and used only
-          to publish and read analytics on your behalf.
+          and others you choose). Tokens are stored in the Service&apos;s
+          database and used only to publish and read analytics on your
+          behalf.
         </li>
         <li>
           Content you create: post text, media uploads, schedules, and

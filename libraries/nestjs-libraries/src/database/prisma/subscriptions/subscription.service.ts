@@ -306,6 +306,8 @@ export class SubscriptionService {
     period: 'MONTHLY' | 'YEARLY',
     cancelAt: number | null
   ) {
+    // Fast-path check only — the authoritative guard is the provider-scoped
+    // write below, which can't be raced the way this precheck could.
     const current = await this._subscriptionRepository.getSubscriptionByOrgId(
       organizationId
     );
@@ -327,18 +329,18 @@ export class SubscriptionService {
       return {};
     }
 
-    return this._subscriptionRepository.createOrUpdateSubscription(
-      provider,
-      isTrailing,
-      identifier,
-      '',
-      totalChannels,
-      billing,
-      period,
-      cancelAt,
-      undefined,
-      { id: organizationId }
-    );
+    const written =
+      await this._subscriptionRepository.upsertSubscriptionByOrgProvider(
+        provider,
+        isTrailing,
+        identifier,
+        organizationId,
+        totalChannels,
+        billing,
+        period,
+        cancelAt
+      );
+    return written === 'conflict' ? {} : written;
   }
 
   getSubscriptionByIdentifier(identifier: string) {
