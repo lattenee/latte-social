@@ -363,10 +363,11 @@ export class SubscriptionService {
         return {};
       }
     } catch (e) {
-      // The row is written but channels/members may lag: a retry is
-      // idempotent (same provider passes the write again) and converges
-      // them, so log instead of throwing past a webhook-safe boundary.
+      // The subscription row was written, but entitlement synchronization
+      // failed. Surface the failure so operators cannot mistake it for a
+      // completed activation; inspect channel/member state before retrying.
       console.error('Error modifying subscription:', e);
+      throw e;
     }
     return written;
   }

@@ -275,9 +275,7 @@ describe('SubscriptionService.createOrUpdateSubscriptionByOrg conflict path', ()
     expect(await invoke(s)).toEqual({ id: 'sub-1', provider: 'manual' });
   });
 
-  it('a modify failure after a successful write is logged, not thrown', async () => {
-    // The row is ours; entitlement reconciliation can be retried, so the
-    // write result still goes back to the caller.
+  it('a modify failure after a successful write is surfaced to the caller', async () => {
     const { s, integrationService } = service(
       { id: 'sub-1', provider: 'manual' },
       null
@@ -285,7 +283,6 @@ describe('SubscriptionService.createOrUpdateSubscriptionByOrg conflict path', ()
     integrationService.getIntegrationsList.mockRejectedValue(
       new Error('db blip')
     );
-    const out = await invoke(s);
-    expect(out).toEqual({ id: 'sub-1', provider: 'manual' });
+    await expect(invoke(s)).rejects.toThrow('db blip');
   });
 });
