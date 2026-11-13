@@ -44,10 +44,17 @@ type ZaloPendingData = {
   article: ZaloArticleDraft;
   token?: string; // upload_video token (video_upload) or article token (article)
   videoId?: string; // resolved by upload_video/verify, used by the create
-  // when postPending armed this post (ms epoch). The dedup lookup only
-  // accepts articles created AFTER this moment (minus clock skew), so a
-  // pre-existing identical article is never mistaken for this post.
+  // when postPending armed this post (ms epoch) - kept for diagnostics
   armedAt?: number;
+  // The arm -> confirm -> create handshake (same shape as
+  // pinterest.provider): finalizePost witnesses the intent (attempting),
+  // the next check durably arms it (confirmed), and only then does the
+  // create run. The workflow persists pendingData BEFORE the mutating
+  // finalize runs, so a create whose receipt was lost is detectable:
+  // attempting+confirmed without an article token means the outcome is
+  // unknown and the post must park, never create again.
+  attempting?: boolean;
+  confirmed?: boolean;
 };
 
 // What a getslice lookup learned about an article this post might have
@@ -81,8 +88,9 @@ type ArticleLookup =
  * /article/verify resolves the final article id. That maps onto the
  * pending-post machinery: postPending only uploads (reversible),
  * finalizePost creates the article (the only irreversible mutation),
- * checkPostStatus stays read-only and resolves the duplicate-risk window
- * by looking the article up on the OA's article list (getslice).
+ * checkPostStatus stays read-only and closes the duplicate-risk window
+ * with an arm -> confirm -> create handshake (Zalo's create has no
+ * idempotency key, so a lost receipt parks the post rather than guessing).
  */
 export class ZaloProvider extends SocialAbstract implements SocialProvider {
   identifier = 'zalo';
@@ -285,7 +293,7 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
     avatarUrl: string | undefined
   ): ZaloArticleDraft {
     return {
-      // title doubles as the article headline and the dedup key below.
+      // title doubles as the article headline.
       title: post.message.slice(0, 150),
       description: post.message.slice(0, 300),
       author: (author || 'Latte').slice(0, 50),
@@ -453,31 +461,22 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
     return token;
   }
 
-  // The OA's own article list, paged newest-first. Used for two things:
-  // de-duplicating an article whose create died with an unknown outcome (a
-  // re-polled check must see the already-created article instead of arming
-  // a second create), and resolving the public `link_view` Zalo never
-  // returns from create/verify.
+  // The OA's own article list, paged newest-first. Used to resolve the
+  // public `link_view` Zalo never returns from create/verify for an article
+  // whose id is already proven. Matched by id only: two posts may
+  // legitimately share a title/description, so caption fields never prove
+  // an article belongs to this post.
   //
   // Fail-closed contract: 'missing' means the list was fully interrogated
   // and the article is not there; ANY failure to answer that question
-  // (network, non-zero Zalo error, a title match that cannot be confirmed)
-  // returns 'unknown' so callers never re-issue a create on a guess.
-  //
-  // A match requires ALL of: same title, same description (getslice returns
-  // it; two posts sharing the 150-char title prefix are different articles),
-  // and create_date >= sinceMs - skew. The sinceMs floor stops a distinct
-  // earlier post with identical text from being silently absorbed as "this
-  // post already exists". Zalo's create_date is epoch seconds on some OAs
-  // and ms on others — both are normalized.
-  private async findArticle(
+  // (network, non-zero Zalo error, an unreadable payload, or the page
+  // budget running out before the history did) returns 'unknown' so
+  // callers never act on a guess.
+  private async findArticleById(
     accessToken: string,
-    draft: ZaloArticleDraft,
     type: 'normal' | 'video',
-    sinceMs: number
+    id: string
   ): Promise<ArticleLookup> {
-    const skewMs = 5 * 60 * 1000;
-    const floorMs = sinceMs - skewMs;
     const PAGE = 50;
     const MAX_PAGES = 10; // 500 most-recent articles of this type is plenty
 
@@ -505,50 +504,33 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
         if (error !== 0) {
           return { status: 'unknown' };
         }
-
-        const medias: any[] = data?.medias || [];
-        if (!medias.length) {
-          break;
-        }
-
-        let sawAmbiguousTitle = false;
-        let oldestSeen = Number.POSITIVE_INFINITY;
-        for (const m of medias) {
-          const raw = Number(m.create_date || 0);
-          // > ~Sep 2001 in ms means the value is already ms; below it,
-          // seconds — normalize before comparing against the ms floor.
-          const createdMs = raw > 1e12 ? raw : raw * 1000;
-          if (createdMs && createdMs < oldestSeen) {
-            oldestSeen = createdMs;
-          }
-          if (m.title !== draft.title || createdMs < floorMs) {
-            continue;
-          }
-          if (m.description === undefined) {
-            // Same title inside the window but the list item cannot prove
-            // it is ours — treat as inconclusive, never as a match and
-            // never as clearance to create again.
-            sawAmbiguousTitle = true;
-            continue;
-          }
-          if (m.description === draft.description) {
-            return {
-              status: 'found',
-              id: String(m.id),
-              link: m.link_view || '',
-            };
-          }
-        }
-        if (sawAmbiguousTitle) {
+        if (!Array.isArray(data?.medias)) {
+          // a successful-looking reply we cannot read is not an empty list
           return { status: 'unknown' };
         }
-        // Items are returned newest-first: once a page's oldest article
-        // predates the window, deeper pages cannot hold a match.
-        if (oldestSeen < floorMs) {
-          break;
+
+        const medias: any[] = data.medias;
+        if (!medias.length) {
+          return { status: 'missing' };
+        }
+
+        const match = medias.find((m) => String(m?.id) === String(id));
+        if (match) {
+          return {
+            status: 'found',
+            id: String(match.id),
+            link: match.link_view || '',
+          };
+        }
+
+        if (medias.length < PAGE) {
+          // a partial page is the end of the list
+          return { status: 'missing' };
         }
       }
-      return { status: 'missing' };
+      // The page budget ran out while history was still unread - that is
+      // not proof the article is absent.
+      return { status: 'unknown' };
     } catch (err) {
       if (err instanceof RefreshToken) {
         throw err; // the workflow retries with a fresh token
@@ -693,7 +675,7 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
         return { status: 'pending', pendingData };
       }
 
-      const link = await this.articleLink(accessToken, pendingData);
+      const link = await this.articleLink(accessToken, pendingData, id!);
       return {
         status: 'completed',
         postId: id!,
@@ -723,59 +705,83 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
       pendingData = { ...pendingData, kind: 'video_ready', videoId };
     }
 
-    // Armed create (article_armed or video_ready): before telling the
-    // workflow to mutate, check whether a previous finalize already created
-    // this article and died before reporting back - that run's pendingData
-    // still says "armed", so without this lookup the article would publish
-    // twice.
-    const lookup = await this.findArticle(
-      accessToken,
-      pendingData.article,
-      pendingData.videoId ? 'video' : 'normal',
-      this.sinceMs(pendingData)
-    );
-    if (lookup.status === 'found') {
-      return {
-        status: 'completed',
-        postId: lookup.id,
-        releaseURL: lookup.link || `https://zalo.me/${integration.profile}`,
-      };
-    }
-    if (lookup.status === 'unknown') {
-      // The list could not be interrogated, so "the article is not there"
-      // is NOT established. Zalo has no idempotency key on article/create,
-      // and create may already have succeeded on a previous attempt whose
-      // receipt was lost — arming finalize now could double-publish. Stay
-      // pending: the workflow re-polls, and a persistent outage parks the
-      // post for manual reconciliation instead of guessing.
-      return { status: 'pending', pendingData };
+    // Armed create (article_armed or video_ready), plus a defensive case:
+    // 'article' without its token is a create whose receipt was mangled.
+    // Zalo's article/create has no idempotency key or client correlation
+    // field, and the OA article list cannot prove which same-caption
+    // article is ours - so once a create is durably armed (attempting +
+    // confirmed) and its receipt never arrives, this check must neither
+    // re-arm nor claim a caption match off the list. Fail closed: park the
+    // post for manual reconciliation on the OA.
+    if (
+      (pendingData.kind === 'article' && !pendingData.token) ||
+      (pendingData.attempting && pendingData.confirmed)
+    ) {
+      throw new BadBody(
+        this.identifier,
+        JSON.stringify({ kind: pendingData.kind }),
+        '{}',
+        'Zalo may have already published this article - check the OA before reposting to avoid duplicates'
+      );
     }
 
-    return { status: 'ready', pendingData };
-  }
-
-  // Dedup window floor: the moment postPending armed this post. pendingData
-  // written by older workflow runs carries no armedAt — fall back to a
-  // 6-hour window, which still bounds dedup without accepting articles that
-  // clearly predate any possible create attempt.
-  private sinceMs(pendingData: ZaloPendingData): number {
-    return pendingData.armedAt ?? dayjs().subtract(6, 'hour').valueOf();
+    // Witness the armed create so finalizePost knows the attempt is
+    // uniquely accounted for before it mutates anything. The workflow
+    // persists this pendingData BEFORE running finalizePost, so a create
+    // that dies after mutating leaves attempting+confirmed set for the
+    // next check instead of arming a second create.
+    return pendingData.attempting
+      ? {
+          status: 'ready',
+          pendingData: { ...pendingData, confirmed: true },
+        }
+      : { status: 'ready', pendingData };
   }
 
   // Best-effort public link for an article whose existence is already
   // proven (by the verify token): an inconclusive lookup just means no
-  // pretty link, never a wrong answer.
+  // pretty link, never a wrong answer. Matched by the verified id, never
+  // by caption - two posts may legitimately share a title/description.
   private async articleLink(
     accessToken: string,
-    pendingData: ZaloPendingData
+    pendingData: ZaloPendingData,
+    id: string
   ): Promise<string> {
-    const lookup = await this.findArticle(
+    const lookup = await this.findArticleById(
       accessToken,
-      pendingData.article,
       pendingData.videoId ? 'video' : 'normal',
-      this.sinceMs(pendingData)
+      id
     );
     return lookup.status === 'found' ? lookup.link : '';
+  }
+
+  // Read-only probe before arming the create: an expired token surfacing
+  // inside the create's response would look exactly like a lost receipt
+  // and park a post that was never created - catch it while the
+  // refresh-retry is still safe.
+  private async assertTokenAlive(accessToken: string) {
+    const { error, message } = await (
+      await this.fetch(
+        `${ZALO_API}/oa/getoa`,
+        {
+          method: 'GET',
+          headers: { access_token: accessToken },
+        },
+        this.identifier
+      )
+    ).json();
+
+    if (error === -216 || error === -220) {
+      throw new RefreshToken(
+        this.identifier,
+        JSON.stringify({ error, message }),
+        '{}',
+        'Zalo access token expired'
+      );
+    }
+    if (error !== 0) {
+      this.mapZaloError(error, message, 'Zalo could not reach the OA');
+    }
   }
 
   override async finalizePost(
@@ -783,11 +789,25 @@ export class ZaloProvider extends SocialAbstract implements SocialProvider {
     pendingData: ZaloPendingData,
     integration: Integration
   ): Promise<PendingCheckResponse> {
-    // The one irreversible mutation. Zalo's create API has no idempotency
-    // key, so exactly-once is not achievable: if this call mutates but the
-    // outcome is lost, the next checkPostStatus finds the article on the OA
-    // list (or stays pending when the list can't be interrogated) rather
-    // than arming a second create.
+    // The one irreversible mutation, behind an arm -> confirm -> publish
+    // handshake (same shape as pinterest.provider): the create only runs
+    // once the attempt is durably witnessed, so a run that dies mid-create
+    // is detectable by the next check and never publishes twice.
+    if (!pendingData.attempting) {
+      await this.assertTokenAlive(accessToken);
+      return {
+        status: 'pending',
+        pendingData: { ...pendingData, attempting: true, confirmed: false },
+      };
+    }
+    if (!pendingData.confirmed) {
+      // Witnessed but not durably armed - this pendingData predates the
+      // armed marker, so refuse to guess: bounce back through the check,
+      // which stamps `confirmed` for the workflow to persist before
+      // finalize is called again.
+      return { status: 'pending', pendingData };
+    }
+
     const token = await this.createArticle(
       accessToken,
       pendingData.article,
