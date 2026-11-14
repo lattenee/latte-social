@@ -8,7 +8,6 @@ import { useReturnUrl } from '@gitroom/frontend/app/(app)/auth/return.url.compon
 import { useVariables } from '@gitroom/react/helpers/variable.context';
 export default function LayoutContext(params: { children: ReactNode }) {
   if (params?.children) {
-    // eslint-disable-next-line react/no-children-prop
     return <LayoutContextInner children={params.children} />;
   }
   return <></>;

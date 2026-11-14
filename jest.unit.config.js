@@ -33,6 +33,8 @@ module.exports = {
     '^@gitroom/plugins/(.*)$': '<rootDir>/libraries/plugins/src/$1',
     '^@gitroom/orchestrator/(.*)$': '<rootDir>/apps/orchestrator/src/$1',
     '^@gitroom/extension/(.*)$': '<rootDir>/apps/extension/src/$1',
+    // ESM-only packages jest cannot parse under its CJS runtime.
+    '^file-type$': '<rootDir>/test/stubs/file-type.js',
   },
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/\\.next/'],
 };

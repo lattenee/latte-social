@@ -157,6 +157,86 @@ export class SubscriptionRepository {
     });
   }
 
+  // Provider-scoped upsert that cannot clobber another provider's row.
+  // updateMany carries the ownership predicate (provider + not-lifetime)
+  // inside the same statement as the write, so the check-and-write is
+  // atomic; the create path relies on the organizationId unique constraint,
+  // losing that race to a concurrent writer (e.g. a payment webhook) is a
+  // 'conflict', never an overwrite. Returns the written row or 'conflict'.
+  async upsertSubscriptionByOrgProvider(
+    provider: string,
+    isTrailing: boolean,
+    identifier: string,
+    organizationId: string,
+    totalChannels: number,
+    billing: 'STANDARD' | 'TEAM' | 'PRO' | 'ULTIMATE',
+    period: 'MONTHLY' | 'YEARLY',
+    cancelAt: number | null
+  ) {
+    const writable = {
+      subscriptionTier: billing,
+      provider,
+      totalChannels,
+      period,
+      identifier,
+      isLifetime: false,
+      cancelAt: cancelAt ? new Date(cancelAt * 1000) : null,
+      deletedAt: null,
+    };
+
+    const updated = await this._subscription.model.subscription.updateMany({
+      where: {
+        organizationId,
+        provider,
+        isLifetime: false,
+      },
+      data: writable,
+    });
+
+    if (updated.count === 1) {
+      await this._organization.model.organization.update({
+        where: { id: organizationId },
+        data: { isTrailing, allowTrial: false },
+      });
+      return this._subscription.model.subscription.findUnique({
+        where: { organizationId },
+      });
+    }
+
+    // count 0 means no writable row: either nothing exists yet, or the row
+    // is owned by another provider / is lifetime — both are conflicts.
+    const existing = await this.getSubscriptionByOrgId(organizationId);
+    if (existing) {
+      return 'conflict' as const;
+    }
+
+    // The unique constraint on organizationId is the last guard: if a
+    // concurrent writer (payment webhook, second admin call) created the
+    // row between the check above and this create, report a conflict
+    // instead of overwriting or exploding. Only the create sits inside the
+    // conflict classifier - an organization update failure after a
+    // successful create is a real error to surface, not an ownership
+    // conflict (a retry then heals through the updateMany path above).
+    let created;
+    try {
+      created = await this._subscription.model.subscription.create({
+        data: { organizationId, ...writable },
+      });
+    } catch (err) {
+      const raced = await this.getSubscriptionByOrgId(organizationId);
+      if (raced) {
+        return 'conflict' as const;
+      }
+      throw err;
+    }
+
+    await this._organization.model.organization.update({
+      where: { id: organizationId },
+      data: { isTrailing, allowTrial: false },
+    });
+    return created;
+  }
+
   async createOrUpdateSubscription(
     provider: string,
     isTrailing: boolean,
@@ -176,7 +256,7 @@ export class SubscriptionRepository {
       return;
     }
 
-    await this._subscription.model.subscription.upsert({
+    const subscription = await this._subscription.model.subscription.upsert({
       where: {
         organizationId: findOrg.id,
         ...(!code && customerId
@@ -228,6 +308,7 @@ export class SubscriptionRepository {
         },
       });
     }
+    return subscription;
   }
 
   getSubscriptionByIdentifier(identifier: string) {

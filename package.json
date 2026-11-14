@@ -258,6 +258,7 @@
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.1",
+    "@microsoft/eslint-formatter-sarif": "2.1.7",
     "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "11.2.7",
     "@pmmmwh/react-refresh-webpack-plugin": "^0.5.7",

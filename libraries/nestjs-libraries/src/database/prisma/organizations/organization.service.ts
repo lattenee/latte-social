@@ -219,4 +219,8 @@ export class OrganizationService {
       shortlink
     );
   }
+
+  markOnboarded(orgId: string) {
+    return this._organizationRepository.markOnboarded(orgId);
+  }
 }
